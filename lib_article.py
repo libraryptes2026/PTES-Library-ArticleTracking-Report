@@ -12,6 +12,7 @@ st.set_page_config(
 )
 
 # --- 2. SECURE DATABASE CONNECTION (GOOGLE SHEETS) ---
+@st.cache_resource
 def connect_to_sheets():
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -20,10 +21,45 @@ def connect_to_sheets():
         client = gspread.authorize(creds)
         return client
     except Exception as e:
-        st.error(f"Database Connection Error: {e}")
         return None
 
 client = connect_to_sheets()
+
+# --- 🧠 ONSITE OPTIMIZATION: CACHED DATA FETCHING ---
+@st.cache_data(ttl=600)  # Remembers data for 10 minutes (600 seconds)
+def fetch_leaderboard_data(target_spreadsheet):
+    """Fetches the leaderboard cells from Google Sheets safely."""
+    if not client:
+        return None
+    try:
+        registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
+        return registry_sheet.get("N225:P227")
+    except Exception as e:
+        return None
+
+@st.cache_data(ttl=600)  # Remembers data for 10 minutes
+def fetch_student_registry(target_spreadsheet):
+    """Fetches the student list block all in one single query."""
+    if not client:
+        return {}
+    class_registry = {}
+    try:
+        registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
+        registry_block = registry_sheet.get("A2:B210")
+        
+        if registry_block:
+            for row in registry_block:
+                if len(row) >= 2:
+                    f_class_clean = str(row[0]).strip()
+                    s_name_clean = str(row[1]).strip()
+                    
+                    if f_class_clean and s_name_clean and "Form" not in f_class_clean:
+                        if f_class_clean not in class_registry:
+                            class_registry[f_class_clean] = []
+                        class_registry[f_class_clean].append(s_name_clean)
+    except Exception as e:
+        pass
+    return class_registry
 
 # --- 3. SIDEBAR BRANDING & DIGITAL CITIZENSHIP ---
 with st.sidebar:
@@ -89,76 +125,55 @@ if client:
             
         st.info(f"Connected to live database: **{target_spreadsheet}**")
         
-        # --- 🏆 TOP 3 READERS LEADERBOARD ENGINE FROM BOTTOM FORMULA RANGE ---
+        # --- 🏆 TOP 3 READERS LEADERBOARD ENGINE ---
         with st.expander("🏆 View Current Top 3 Reading Leaderboard", expanded=False):
             st.markdown("### 🥇 Top 3 Readers of this Cohort")
-            try:
-                registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
-                top_cells = registry_sheet.get("N225:P227")
+            
+            top_cells = fetch_leaderboard_data(target_spreadsheet)
+            
+            has_content = False
+            if top_cells:
+                for row in top_cells:
+                    if len(row) > 0 and str(row[0]).strip() != "" and str(row[0]).strip() != "0":
+                        has_content = True
+            
+            if has_content:
+                cols_dash = st.columns(len(top_cells))
+                medals = ["🥇 1st Place", "🥈 2nd Place", "🥉 3rd Place"]
                 
-                has_content = False
-                if top_cells:
-                    for row in top_cells:
-                        if len(row) > 0 and str(row[0]).strip() != "" and str(row[0]).strip() != "0":
-                            has_content = True
+                for idx, data_row in enumerate(top_cells):
+                    if len(data_row) >= 3 and str(data_row[0]).strip():
+                        s_name = data_row[0]
+                        f_class = data_row[1]
+                        t_score = data_row[2]
+                        
+                        with cols_dash[idx]:
+                            st.metric(
+                                label=f"{medals[idx]} ({f_class})",
+                                value=f"{s_name}",
+                                delta=f"{t_score} Total Articles"
+                            )
                 
-                if has_content:
-                    cols_dash = st.columns(len(top_cells))
-                    medals = ["🥇 1st Place", "🥈 2nd Place", "🥉 3rd Place"]
-                    
-                    for idx, data_row in enumerate(top_cells):
-                        if len(data_row) >= 3 and str(data_row[0]).strip():
-                            s_name = data_row[0]
-                            f_class = data_row[1]
-                            t_score = data_row[2]
-                            
-                            with cols_dash[idx]:
-                                st.metric(
-                                    label=f"{medals[idx]} ({f_class})",
-                                    value=f"{s_name}",
-                                    delta=f"{t_score} Total Articles"
-                                )
-                    
-                    leaderboard_data = []
-                    for data_row in top_cells:
-                        if len(data_row) >= 3 and str(data_row[0]).strip():
-                            leaderboard_data.append({
-                                "Form Class": data_row[1],
-                                "Student Name": data_row[0],
-                                "Total Articles Read": int(data_row[2]) if str(data_row[2]).isdigit() else data_row[2]
-                            })
-                    if leaderboard_data:
-                        st.markdown("#### Detailed Leaderboard View")
-                        st.dataframe(pd.DataFrame(leaderboard_data), use_container_width=True, hide_index=True)
-                else:
-                    st.info("ℹ️ No leaderboard records yet. This cohort has no recorded reading counts higher than 0.")
-            except Exception as e:
-                st.error(f"Could not extract leaderboard formula cells: {e}")
+                leaderboard_data = []
+                for data_row in top_cells:
+                    if len(data_row) >= 3 and str(data_row[0]).strip():
+                        leaderboard_data.append({
+                            "Form Class": data_row[1],
+                            "Student Name": data_row[0],
+                            "Total Articles Read": int(data_row[2]) if str(data_row[2]).isdigit() else data_row[2]
+                        })
+                if leaderboard_data:
+                    st.markdown("#### Detailed Leaderboard View")
+                    st.dataframe(pd.DataFrame(leaderboard_data), use_container_width=True, hide_index=True)
+            else:
+                st.info("ℹ️ No leaderboard records yet. This cohort has no recorded reading counts higher than 0.")
                 
         st.markdown("---")
 
-        # 🛰️ FETCH REGISTRY DYNAMICALLY (SINGLE CELL REQUEST OUTSMARTS THE 429 QUOTA LIMIT)
-        class_registry = {}
-        try:
-            registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
+        # 🛰️ FETCH REGISTRY VIA MEMORY CACHE
+        class_registry = fetch_student_registry(target_spreadsheet)
             
-            # Pull rows 2 to 210 for columns A & B all in 1 combined query block
-            registry_block = registry_sheet.get("A2:B210")
-            
-            if registry_block:
-                for row in registry_block:
-                    if len(row) >= 2:
-                        f_class_clean = str(row[0]).strip()
-                        s_name_clean = str(row[1]).strip()
-                        
-                        if f_class_clean and s_name_clean and "Form" not in f_class_clean:
-                            if f_class_clean not in class_registry:
-                                class_registry[f_class_clean] = []
-                            class_registry[f_class_clean].append(s_name_clean)
-        except Exception as e:
-            st.warning(f"⚠️ API Quota Limit encountered. Retrying connection momentarily... Details: {e}")
-            
-        # Hardcoded dynamic fallback array layout structures
+        # Hardcoded static fallback array layout structures if spreadsheet is completely unpopulated
         if not class_registry:
             if "BE" in target_spreadsheet:
                 class_registry = {"BE 1": ["Ahmad Ali"], "BE 2": ["Chong Wei"]}
@@ -238,11 +253,16 @@ if client:
                     ]
                     
                     challenge_db.append_row(new_tally_row, value_input_option="USER_ENTERED")
+                    
+                    # 🧹 CRITICAL CLEAR CACHE ON DATA WRITES: 
+                    # Clears local app memory so the leaderboard updates instantly on submission!
+                    st.cache_data.clear()
+                    
                     st.success(f"🎉 Success! Recorded {article_count} articles for {selected_student} ({selected_class}) into **{target_spreadsheet}**.")
                     st.rerun()
                     
                 except Exception as e:
-                    st.error(f"Failed to record data. Please check worksheet connection. Details: {e}")
+                    st.error(f"Failed to record data. Details: {e}")
                 
     elif admin_pass != "":
         st.error("❌ Invalid Credentials. Access Denied.")
