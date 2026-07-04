@@ -28,7 +28,7 @@ client = connect_to_sheets()
 # --- 3. SIDEBAR BRANDING & DIGITAL CITIZENSHIP ---
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Flag_of_Brunei.svg/180px-Flag_of_Brunei.svg.png", width=100)
-    st.title("PTES Library Reading Articles")
+    st.title("PTES Library Services")
     st.markdown("### 📋 System Guidelines")
     
     with st.expander("📖 Reading Articles Rules"):
@@ -63,7 +63,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # --- 4. MAIN INTERFACE LOGIC ---
-st.title("📚 PTES Library Reading Articles HUB")
+st.title("📚 PTES Reading Articles Tracker")
 st.markdown("Automating the tracking of student reading habits cleanly and efficiently.")
 st.markdown("---")
 
@@ -148,11 +148,11 @@ if client:
         for i in range(int(article_count)):
             col_index = i % 4
             with cols[col_index]:
-                # Force calendar dropdown window to load on the anchored target month layout
+                # Force unique keys using the month name to clear internal state history cache
                 date_val = st.date_input(
                     f"Article #{i+1} Date", 
                     value=default_calendar_date,
-                    key=f"challenge_date_{i}"
+                    key=f"{selected_month}_challenge_date_{i}"
                 )
                 reading_dates.append(date_val.strftime("%d/%m/%Y"))
         
