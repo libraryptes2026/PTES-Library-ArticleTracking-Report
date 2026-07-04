@@ -90,18 +90,71 @@ if client:
             
         st.info(f"Connected to live database: **{target_spreadsheet}**")
         
-        # 🛰️ FETCH REGISTRY DATA FIRST (To use for both Leaderboard & Form Dropdowns)
+        # --- 🏆 TOP 3 READERS LEADERBOARD ENGINE ---
+        with st.expander("🏆 View Current Top 3 Reading Leaderboard", expanded=False):
+            st.markdown("### 🥇 Top 3 Readers of this Cohort")
+            try:
+                # Fetch historical transaction records from the log sheet
+                leaderboard_sheet = client.open(target_spreadsheet).worksheet("Reading_Article_DB")
+                raw_logs = leaderboard_sheet.get_all_records()
+                
+                if raw_logs:
+                    df_logs = pd.DataFrame(raw_logs)
+                    
+                    # Clean hidden trailing spaces from the spreadsheet headers dynamically
+                    df_logs.columns = [str(col).strip() for col in df_logs.columns]
+                    
+                    # Match your exact column text header from the image
+                    target_column = "Articles Read"
+                    
+                    if target_column in df_logs.columns and "Student Name" in df_logs.columns:
+                        # Convert counts safely to integers
+                        df_logs[target_column] = pd.to_numeric(df_logs[target_column], errors='coerce').fillna(0)
+                        
+                        # Group historical entries together per unique student
+                        leaderboard = df_logs.groupby(["Student Name", "Form Class"])[target_column].sum().reset_index()
+                        top_readers = leaderboard.sort_values(by=target_column, ascending=False).head(3)
+                        
+                        if not top_readers.empty:
+                            cols_dash = st.columns(3)
+                            medals = ["🥇 1st Place", "🥈 2nd Place", "🥉 3rd Place"]
+                            
+                            for idx, row in enumerate(top_readers.itertuples(index=False)):
+                                if idx < len(cols_dash):
+                                    with cols_dash[idx]:
+                                        st.metric(
+                                            label=f"{medals[idx]} ({getattr(row, 'Form Class')})",
+                                            value=f"{getattr(row, 'Student Name')}",
+                                            delta=f"{int(getattr(row, target_column))} Articles"
+                                        )
+                            
+                            st.markdown("#### Detailed Leaderboard View")
+                            st.dataframe(
+                                top_readers.rename(columns={target_column: "Total Articles Read"}), 
+                                use_container_width=True, 
+                                hide_index=True
+                            )
+                        else:
+                            st.info("No records found with reading counts higher than 0.")
+                    else:
+                        st.warning(f"⚠️ Could not locate column '{target_column}' inside Row 1 of your sheet.")
+                else:
+                    st.info("The Reading_Article_DB sheet is currently empty.")
+                    
+            except Exception as e:
+                st.error(f"Could not load leaderboard stats: {e}")
+        
+        st.markdown("---")
+
+        # 🛰️ FETCH REGISTRY DYNAMICALLY FOR ENTRY DROPDOWNS
         try:
             registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
             registry_data = registry_sheet.get_all_records()
             
-            # Build the class registry dict for dropdowns
             class_registry = {}
             for row in registry_data:
-                # Clean up column spaces dynamically to capture keys safely
+                # Dynamically manage variations in formatting safely
                 clean_row = {str(k).strip(): v for k, v in row.items()}
-                
-                # Use flexible keys to match "Form (" column safely
                 form_key = [k for k in clean_row.keys() if "Form" in k]
                 form_class = str(clean_row.get(form_key[0], "")).strip() if form_key else ""
                 student_name = str(clean_row.get("Student Name", "")).strip()
@@ -110,59 +163,12 @@ if client:
                     if form_class not in class_registry:
                         class_registry[form_class] = []
                     class_registry[form_class].append(student_name)
-                    
-            # --- 🏆 TOP 3 READERS LEADERBOARD ENGINE FROM REGISTRY ---
-            with st.expander("🏆 View Current Top 3 Reading Leaderboard", expanded=False):
-                st.markdown("### 🥇 Top 3 Readers of this Cohort")
-                if registry_data:
-                    df_reg = pd.DataFrame(registry_data)
-                    # Clean trailing whitespaces from headers
-                    df_reg.columns = [str(col).strip() for col in df_reg.columns]
-                    
-                    # Identify Form Class column flexible header mapping
-                    f_col = [c for c in df_reg.columns if "Form" in c][0]
-                    
-                    if "Student Name" in df_reg.columns and "TOTAL" in df_reg.columns:
-                        # Enforce numeric typing on Totals column
-                        df_reg["TOTAL"] = pd.to_numeric(df_reg["TOTAL"], errors='coerce').fillna(0)
-                        
-                        # Sort to find the highest total scores
-                        top_readers = df_reg.sort_values(by="TOTAL", ascending=False).head(3)
-                        
-                        if not top_readers.empty and top_readers["TOTAL"].max() > 0:
-                            cols_dash = st.columns(3)
-                            medals = ["🥇 1st Place", "🥈 2nd Place", "🥉 3rd Place"]
-                            
-                            for idx, row in enumerate(top_readers.itertuples(index=False)):
-                                if idx < len(cols_dash):
-                                    with cols_dash[idx]:
-                                        st.metric(
-                                            label=f"{medals[idx]} ({getattr(row, f_col)})",
-                                            value=f"{getattr(row, 'Student Name')}",
-                                            delta=f"{int(getattr(row, 'TOTAL'))} Total Articles"
-                                        )
-                            
-                            st.markdown("#### Detailed Leaderboard View")
-                            display_df = top_readers[[f_col, "Student Name", "TOTAL"]].rename(
-                                columns={f_col: "Form Class", "TOTAL": "Total Articles Read"}
-                            )
-                            st.dataframe(display_df, use_container_width=True, hide_index=True)
-                        else:
-                            st.info("No student reading records have totaled totals above 0 yet.")
-                    else:
-                        st.warning("⚠️ Column headers 'Student Name' or 'TOTAL' were not found in 'Student_Registry'.")
-                else:
-                    st.info("Student registry is currently empty.")
-                    
         except Exception as e:
-            # Safe fallback if connection fails completely
             if "BE" in target_spreadsheet:
-                class_registry = {"BE1": ["Ahmad Ali", "Dayang Siti"], "BE2": ["Chong Wei", "Nur Huda"]}
+                class_registry = {"BE 1": ["Ahmad Ali", "Dayang Siti"], "BE 2": ["Chong Wei", "Nur Huda"]}
             else:
-                class_registry = {"AE1": ["Siti Aminah", "Mohammad Noor"], "AE2": ["Aliah Razak", "Khairul Amin"]}
-            st.warning(f"⚠️ Note: Could not load live leaderboard registry from '{target_spreadsheet}'. Showing offline entry forms.")
-
-        st.markdown("---")
+                class_registry = {"AE 1": ["Siti Aminah", "Mohammad Noor"], "AE 2": ["Aliah Razak", "Khairul Amin"]}
+            st.warning("⚠️ Note: Using system registry fallbacks.")
 
         # 📝 ENTRY DETAILS FIELD
         st.markdown("### 📝 Step 2: Enter Student Tally Details")
