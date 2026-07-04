@@ -82,7 +82,6 @@ if client:
                     class_registry[form_class] = []
                 class_registry[form_class].append(student_name)
     except Exception:
-        # Fallback dictionary if the registry sheet rows are empty on initial launch
         class_registry = {
             "BE1": ["Ahmad Ali", "Dayang Siti"],
             "BE2": ["Chong Wei", "Nur Huda"]
@@ -96,7 +95,6 @@ if client:
         st.success("🔓 Librarian Access Granted.")
         st.markdown("### 📝 Enter Student Tally Details")
         
-        # UI Parameters Columns
         col1, col2 = st.columns(2)
         
         with col1:
@@ -112,11 +110,10 @@ if client:
             
             article_count = st.number_input("4. Amount of Reading Articles Done:", min_value=1, max_value=31, step=1)
         
-        # Dynamic Date Container
         st.markdown("---")
         st.write(f"📂 **5. Enter the specific calendar dates for the {int(article_count)} materials read:**")
         reading_dates = []
-        cols = st.columns(4) # Split into 4 clean columns across the screen layout
+        cols = st.columns(4)
         
         for i in range(int(article_count)):
             col_index = i % 4
@@ -132,11 +129,6 @@ if client:
                 challenge_db = client.open("Articles_Tracker_DB").worksheet("Reading_Article_DB")
                 dates_string = ", ".join(reading_dates)
                 
-                # Automatically add table headers if worksheet is fresh
-                existing_rows = challenge_db.get_all_values()
-                if len(existing_rows) == 0:
-                    challenge_db.append_row(["Timestamp", "Form Class", "Student Name", "Month", "Articles Read", "Target Dates"])
-                
                 new_tally_row = [
                     datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
                     selected_class,
@@ -146,8 +138,10 @@ if client:
                     dates_string
                 ]
                 
+                # Directly append the row safely without checking for previous elements
                 challenge_db.append_row(new_tally_row)
                 st.success(f"🎉 Success! Recorded {article_count} articles for {selected_student} ({selected_class}) into the system database.")
+                
             except Exception as e:
                 st.error(f"Failed to record data. Please check worksheet connection. Details: {e}")
                 
