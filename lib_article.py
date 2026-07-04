@@ -63,7 +63,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # --- 4. MAIN INTERFACE LOGIC ---
-st.title("📚 PTES Reading Articles Tracker")
+st.title("📚 PTES Library Reading Articles HUB")
 st.markdown("Automating the tracking of student reading habits cleanly and efficiently.")
 st.markdown("---")
 
