@@ -6,7 +6,7 @@ from datetime import datetime
 
 # --- 1. PAGE CONFIGURATION & STYLING ---
 st.set_page_config(
-    page_title="PTES Library Reading Articles HUB",
+    page_title="PTES Reading Articles Tracker",
     page_icon="📚",
     layout="wide"
 )
@@ -63,38 +63,57 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # --- 4. MAIN INTERFACE LOGIC ---
-st.title("📚 PTES Library Reading Articles HUB")
+st.title("📚 PTES Reading Articles Tracker")
 st.markdown("Automating the tracking of student reading habits cleanly and efficiently.")
 st.markdown("---")
 
 if client:
-    # 🛰️ FETCH REGISTRY FROM GOOGLE SHEETS
-    try:
-        registry_sheet = client.open("Articles_Tracker_DB").worksheet("Student_Registry")
-        registry_data = registry_sheet.get_all_records()
-        
-        class_registry = {}
-        for row in registry_data:
-            form_class = str(row.get("Form Class", "")).strip()
-            student_name = str(row.get("Student Name", "")).strip()
-            if form_class and student_name:
-                if form_class not in class_registry:
-                    class_registry[form_class] = []
-                class_registry[form_class].append(student_name)
-    except Exception:
-        class_registry = {
-            "BE1": ["Ahmad Ali", "Dayang Siti"],
-            "BE2": ["Chong Wei", "Nur Huda"]
-        }
-        st.warning("⚠️ Note: 'Student_Registry' rows are empty or unreadable. Showing demo registry entries.")
-
     # 🔐 LIBRARIAN VERIFICATION LAYER
     admin_pass = st.text_input("🗝️ Enter Librarian Credentials to Unlock Tracker Form:", type="password")
     
     if admin_pass == st.secrets["admin_password"]:
         st.success("🔓 Librarian Access Granted.")
-        st.markdown("### 📝 Enter Student Tally Details")
+        st.markdown("---")
         
+        # ✨ NEW COMPONENT: SINGLE GATEWAY DATABASE SELECTOR
+        st.markdown("### 🗂️ Step 1: Select Cohort Level")
+        cohort_choice = st.selectbox(
+            "Choose Student Cohort Database to open:",
+            ["Lower Sixth (BE Classes)", "Upper Sixth (AE Classes)"]
+        )
+        
+        # Map the selector choice directly to the corresponding Google Sheet name
+        if cohort_choice == "Lower Sixth (BE Classes)":
+            target_spreadsheet = "Articles_Tracker_DB_BE"
+        else:
+            target_spreadsheet = "Articles_Tracker_DB_AE"
+            
+        st.info(f"Connected to live database: **{target_spreadsheet}**")
+        st.markdown("---")
+
+        # 🛰️ FETCH REGISTRY DYNAMICALLY BASED ON SELECTED SHEET
+        try:
+            registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
+            registry_data = registry_sheet.get_all_records()
+            
+            class_registry = {}
+            for row in registry_data:
+                form_class = str(row.get("Form Class", "")).strip()
+                student_name = str(row.get("Student Name", "")).strip()
+                if form_class and student_name:
+                    if form_class not in class_registry:
+                        class_registry[form_class] = []
+                    class_registry[form_class].append(student_name)
+        except Exception as e:
+            # Fallback data adjusts contextually to match selection visual rules
+            if "BE" in target_spreadsheet:
+                class_registry = {"BE1": ["Ahmad Ali", "Dayang Siti"], "BE2": ["Chong Wei", "Nur Huda"]}
+            else:
+                class_registry = {"AE1": ["Siti Aminah", "Mohammad Noor"], "AE2": ["Aliah Razak", "Khairul Amin"]}
+            st.warning(f"⚠️ Note: Could not pull data from '{target_spreadsheet}'. Showing demo entries.")
+
+        # 📝 ENTRY DETAILS FIELD
+        st.markdown("### 📝 Step 2: Enter Student Tally Details")
         col1, col2 = st.columns(2)
         
         with col1:
@@ -123,7 +142,7 @@ if client:
         
         st.markdown("---")
         
-        # ✨ NEW OPTIONAL REMARKS INPUT BAR
+        # OPTIONAL REMARKS INPUT BAR
         student_remarks = st.text_input(
             "📝 6. Additional Remarks / Student Status Notes (Optional):", 
             value="", 
@@ -135,10 +154,10 @@ if client:
         # Submit Operation
         if st.button("🔥 Submit Tally Data Logs", use_container_width=True):
             try:
-                challenge_db = client.open("Articles_Tracker_DB").worksheet("Reading_Article_DB")
+                # Opens whichever sheet was declared dynamically in Step 1
+                challenge_db = client.open(target_spreadsheet).worksheet("Reading_Article_DB")
                 dates_string = ", ".join(reading_dates)
                 
-                # Format elements cleanly to pure raw string values
                 new_tally_row = [
                     str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")),
                     str(selected_class),
@@ -149,9 +168,9 @@ if client:
                     str(student_remarks).strip()
                 ]
                 
-                # Append row safely as plain text to prevent formatting type rejections
+                # Appends into the target database layout smoothly
                 challenge_db.append_row(new_tally_row, value_input_option="USER_ENTERED")
-                st.success(f"🎉 Success! Recorded {article_count} articles for {selected_student} ({selected_class}) into the system database.")
+                st.success(f"🎉 Success! Recorded {article_count} articles for {selected_student} ({selected_class}) into **{target_spreadsheet}**.")
                 
             except Exception as e:
                 st.error(f"Failed to record data. Please check worksheet connection. Details: {e}")
