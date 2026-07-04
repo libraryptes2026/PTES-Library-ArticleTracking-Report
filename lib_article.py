@@ -6,7 +6,7 @@ from datetime import datetime
 
 # --- 1. PAGE CONFIGURATION & STYLING ---
 st.set_page_config(
-    page_title="PTES Reading Articles Tracker",
+    page_title="PTES Library Reading Articles HUB",
     page_icon="📚",
     layout="wide"
 )
@@ -123,23 +123,34 @@ if client:
         
         st.markdown("---")
         
+        # ✨ NEW OPTIONAL REMARKS INPUT BAR
+        student_remarks = st.text_input(
+            "📝 6. Additional Remarks / Student Status Notes (Optional):", 
+            value="", 
+            placeholder="e.g., Transferred to Polytechnic / Special consideration"
+        )
+        
+        st.markdown("---")
+        
         # Submit Operation
         if st.button("🔥 Submit Tally Data Logs", use_container_width=True):
             try:
                 challenge_db = client.open("Articles_Tracker_DB").worksheet("Reading_Article_DB")
                 dates_string = ", ".join(reading_dates)
                 
+                # Format elements cleanly to pure raw string values
                 new_tally_row = [
-                    datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-                    selected_class,
-                    selected_student,
-                    selected_month,
-                    int(article_count),
-                    dates_string
+                    str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")),
+                    str(selected_class),
+                    str(selected_student),
+                    str(selected_month),
+                    str(int(article_count)),
+                    str(dates_string),
+                    str(student_remarks).strip()
                 ]
                 
-                # Directly append the row safely without checking for previous elements
-                challenge_db.append_row(new_tally_row)
+                # Append row safely as plain text to prevent formatting type rejections
+                challenge_db.append_row(new_tally_row, value_input_option="USER_ENTERED")
                 st.success(f"🎉 Success! Recorded {article_count} articles for {selected_student} ({selected_class}) into the system database.")
                 
             except Exception as e:
