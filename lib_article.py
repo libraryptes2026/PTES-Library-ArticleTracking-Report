@@ -93,20 +93,17 @@ if client:
         with st.expander("🏆 View Current Top 3 Reading Leaderboard", expanded=False):
             st.markdown("### 🥇 Top 3 Readers of this Cohort")
             try:
-                # Open the master registry tracking tab
                 registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
                 
-                # TARGET THE CUSTOM DESIGNATED RANGE AT THE BOTTOM
                 # Column N = Student Name, Column O = Form Class, Column P = TOTAL Score
                 top_cells = registry_sheet.get("N225:P227")
                 
-                if top_cells and len(top_cells) > 0:
+                if top_cells and len(top_cells) > 0 and any(any(cell.strip() for cell in row) for row in top_cells):
                     cols_dash = st.columns(len(top_cells))
                     medals = ["🥇 1st Place", "🥈 2nd Place", "🥉 3rd Place"]
                     
-                    # Create beautifully styled metric boxes for the layout
                     for idx, data_row in enumerate(top_cells):
-                        if len(data_row) >= 3:
+                        if len(data_row) >= 3 and str(data_row[0]).strip():
                             s_name = data_row[0]
                             f_class = data_row[1]
                             t_score = data_row[2]
@@ -118,47 +115,56 @@ if client:
                                     delta=f"{t_score} Total Articles"
                                 )
                     
-                    # Generate a clean summary table breakdown underneath
                     leaderboard_data = []
                     for data_row in top_cells:
-                        if len(data_row) >= 3:
+                        if len(data_row) >= 3 and str(data_row[0]).strip():
                             leaderboard_data.append({
                                 "Form Class": data_row[1],
                                 "Student Name": data_row[0],
                                 "Total Articles Read": int(data_row[2]) if str(data_row[2]).isdigit() else data_row[2]
                             })
-                    st.markdown("#### Detailed Leaderboard View")
-                    st.dataframe(pd.DataFrame(leaderboard_data), use_container_width=True, hide_index=True)
+                    if leaderboard_data:
+                        st.markdown("#### Detailed Leaderboard View")
+                        st.dataframe(pd.DataFrame(leaderboard_data), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("No active leaderboard rows found to format.")
                 else:
-                    st.info("No leaderboard records found. Ensure your formulas are loaded in cells N225:P227.")
+                    st.info("No leaderboard records found. This cohort has no recorded reading counts higher than 0 yet.")
             except Exception as e:
                 st.error(f"Could not extract leaderboard formula cells: {e}")
                 
         st.markdown("---")
 
-        # 🛰️ FETCH REGISTRY DYNAMICALLY FOR ENTRY DROPDOWNS
+        # 🛰️ FETCH REGISTRY DYNAMICALLY (ROBUST TO BOTTOM TABLES)
         try:
             registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
-            registry_data = registry_sheet.get_all_records()
+            
+            # Fetch specifically just Columns A & B where Form Class & Student Name live
+            # Restricting to row 210 completely ignores your custom ranking block down below!
+            raw_class_col = registry_sheet.col_values(1)[1:210]  # Skipped header row 1
+            raw_student_col = registry_sheet.col_values(2)[1:210]
             
             class_registry = {}
-            for row in registry_data:
-                # Filter rows out if they are past your standard listing boundaries
-                clean_row = {str(k).strip(): v for k, v in row.items()}
-                form_key = [k for k in clean_row.keys() if "Form" in k]
-                form_class = str(clean_row.get(form_key[0], "")).strip() if form_key else ""
-                student_name = str(clean_row.get("Student Name", "")).strip()
+            for f_class, s_name in zip(raw_class_col, raw_student_col):
+                f_class_clean = str(f_class).strip()
+                s_name_clean = str(s_name).strip()
                 
-                if form_class and student_name and not form_class.startswith("TOP"):
-                    if form_class not in class_registry:
-                        class_registry[form_class] = []
-                    class_registry[form_class].append(student_name)
+                # Check that row contains a valid student record
+                if f_class_clean and s_name_clean and "Form" not in f_class_clean:
+                    if f_class_clean not in class_registry:
+                        class_registry[f_class_clean] = []
+                    class_registry[f_class_clean].append(s_name_clean)
+                    
+            if not class_registry:
+                raise ValueError("Extracted registry mapping is empty.")
+                
         except Exception as e:
+            # Code fallback only if Google Sheets API fails entirely
             if "BE" in target_spreadsheet:
                 class_registry = {"BE 1": ["Ahmad Ali", "Dayang Siti"], "BE 2": ["Chong Wei", "Nur Huda"]}
             else:
                 class_registry = {"AE 1": ["Siti Aminah", "Mohammad Noor"], "AE 2": ["Aliah Razak", "Khairul Amin"]}
-            st.warning("⚠️ Note: Using system registry fallbacks.")
+            st.warning(f"⚠️ Note: Using system registry fallbacks. Connection issue: {e}")
 
         # 📝 ENTRY DETAILS FIELD
         st.markdown("### 📝 Step 2: Enter Student Tally Details")
