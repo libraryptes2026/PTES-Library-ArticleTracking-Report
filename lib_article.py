@@ -6,7 +6,7 @@ from datetime import datetime
 
 # --- 1. PAGE CONFIGURATION & STYLING ---
 st.set_page_config(
-    page_title="PTES Annual Reading Articles Tracker",
+    page_title="PTES Reading Articles Tracker",
     page_icon="📚",
     layout="wide"
 )
