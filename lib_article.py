@@ -82,7 +82,6 @@ if client:
             ["Lower Sixth (BE Classes)", "Upper Sixth (AE Classes)"]
         )
         
-        # Map choice to correct Google Sheet layout name
         if cohort_choice == "Lower Sixth (BE Classes)":
             target_spreadsheet = "Articles_Tracker_DB_BE"
         else:
@@ -90,60 +89,51 @@ if client:
             
         st.info(f"Connected to live database: **{target_spreadsheet}**")
         
-        # --- 🏆 TOP 3 READERS LEADERBOARD ENGINE ---
+        # --- 🏆 TOP 3 READERS LEADERBOARD ENGINE FROM BOTTOM FORMULA RANGE ---
         with st.expander("🏆 View Current Top 3 Reading Leaderboard", expanded=False):
             st.markdown("### 🥇 Top 3 Readers of this Cohort")
             try:
-                # Fetch historical transaction records from the log sheet
-                leaderboard_sheet = client.open(target_spreadsheet).worksheet("Reading_Article_DB")
-                raw_logs = leaderboard_sheet.get_all_records()
+                # Open the master registry tracking tab
+                registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
                 
-                if raw_logs:
-                    df_logs = pd.DataFrame(raw_logs)
+                # TARGET THE CUSTOM DESIGNATED RANGE AT THE BOTTOM
+                # Column N = Student Name, Column O = Form Class, Column P = TOTAL Score
+                top_cells = registry_sheet.get("N225:P227")
+                
+                if top_cells and len(top_cells) > 0:
+                    cols_dash = st.columns(len(top_cells))
+                    medals = ["🥇 1st Place", "🥈 2nd Place", "🥉 3rd Place"]
                     
-                    # Clean hidden trailing spaces from the spreadsheet headers dynamically
-                    df_logs.columns = [str(col).strip() for col in df_logs.columns]
-                    
-                    # Match your exact column text header from the image
-                    target_column = "Articles Read"
-                    
-                    if target_column in df_logs.columns and "Student Name" in df_logs.columns:
-                        # Convert counts safely to integers
-                        df_logs[target_column] = pd.to_numeric(df_logs[target_column], errors='coerce').fillna(0)
-                        
-                        # Group historical entries together per unique student
-                        leaderboard = df_logs.groupby(["Student Name", "Form Class"])[target_column].sum().reset_index()
-                        top_readers = leaderboard.sort_values(by=target_column, ascending=False).head(3)
-                        
-                        if not top_readers.empty:
-                            cols_dash = st.columns(3)
-                            medals = ["🥇 1st Place", "🥈 2nd Place", "🥉 3rd Place"]
+                    # Create beautifully styled metric boxes for the layout
+                    for idx, data_row in enumerate(top_cells):
+                        if len(data_row) >= 3:
+                            s_name = data_row[0]
+                            f_class = data_row[1]
+                            t_score = data_row[2]
                             
-                            for idx, row in enumerate(top_readers.itertuples(index=False)):
-                                if idx < len(cols_dash):
-                                    with cols_dash[idx]:
-                                        st.metric(
-                                            label=f"{medals[idx]} ({getattr(row, 'Form Class')})",
-                                            value=f"{getattr(row, 'Student Name')}",
-                                            delta=f"{int(getattr(row, target_column))} Articles"
-                                        )
-                            
-                            st.markdown("#### Detailed Leaderboard View")
-                            st.dataframe(
-                                top_readers.rename(columns={target_column: "Total Articles Read"}), 
-                                use_container_width=True, 
-                                hide_index=True
-                            )
-                        else:
-                            st.info("No records found with reading counts higher than 0.")
-                    else:
-                        st.warning(f"⚠️ Could not locate column '{target_column}' inside Row 1 of your sheet.")
+                            with cols_dash[idx]:
+                                st.metric(
+                                    label=f"{medals[idx]} ({f_class})",
+                                    value=f"{s_name}",
+                                    delta=f"{t_score} Total Articles"
+                                )
+                    
+                    # Generate a clean summary table breakdown underneath
+                    leaderboard_data = []
+                    for data_row in top_cells:
+                        if len(data_row) >= 3:
+                            leaderboard_data.append({
+                                "Form Class": data_row[1],
+                                "Student Name": data_row[0],
+                                "Total Articles Read": int(data_row[2]) if str(data_row[2]).isdigit() else data_row[2]
+                            })
+                    st.markdown("#### Detailed Leaderboard View")
+                    st.dataframe(pd.DataFrame(leaderboard_data), use_container_width=True, hide_index=True)
                 else:
-                    st.info("The Reading_Article_DB sheet is currently empty.")
-                    
+                    st.info("No leaderboard records found. Ensure your formulas are loaded in cells N225:P227.")
             except Exception as e:
-                st.error(f"Could not load leaderboard stats: {e}")
-        
+                st.error(f"Could not extract leaderboard formula cells: {e}")
+                
         st.markdown("---")
 
         # 🛰️ FETCH REGISTRY DYNAMICALLY FOR ENTRY DROPDOWNS
@@ -153,13 +143,13 @@ if client:
             
             class_registry = {}
             for row in registry_data:
-                # Dynamically manage variations in formatting safely
+                # Filter rows out if they are past your standard listing boundaries
                 clean_row = {str(k).strip(): v for k, v in row.items()}
                 form_key = [k for k in clean_row.keys() if "Form" in k]
                 form_class = str(clean_row.get(form_key[0], "")).strip() if form_key else ""
                 student_name = str(clean_row.get("Student Name", "")).strip()
                 
-                if form_class and student_name:
+                if form_class and student_name and not form_class.startswith("TOP"):
                     if form_class not in class_registry:
                         class_registry[form_class] = []
                     class_registry[form_class].append(student_name)
