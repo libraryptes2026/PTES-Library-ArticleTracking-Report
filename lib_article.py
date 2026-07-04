@@ -90,77 +90,79 @@ if client:
             
         st.info(f"Connected to live database: **{target_spreadsheet}**")
         
-        # --- NEW FEATURE: TOP 3 READERS LEADERBOARD ---
-        with st.expander("🏆 View Current Top 3 Reading Leaderboard", expanded=False):
-            st.markdown("### 🥇 Top 3 Readers of this Cohort")
-            try:
-                # Fetch data from the reading database worksheet
-                leaderboard_sheet = client.open(target_spreadsheet).worksheet("Reading_Article_DB")
-                raw_logs = leaderboard_sheet.get_all_records()
-                
-                if raw_logs:
-                    df_logs = pd.DataFrame(raw_logs)
-                    
-                    # Ensure column names match exactly and fix data types
-                    df_logs["Amount of Reading Articles Done"] = pd.to_numeric(
-                        df_logs["Amount of Reading Articles Done"], errors='coerce'
-                    ).fillna(0)
-                    
-                    # Group data by student and class
-                    leaderboard = df_logs.groupby(["Student Name", "Form Class"])["Amount of Reading Articles Done"].sum().reset_index()
-                    
-                    # Sort to get highest readers on top
-                    top_readers = leaderboard.sort_values(by="Amount of Reading Articles Done", ascending=False).head(3)
-                    
-                    if not top_readers.empty:
-                        cols_dash = st.columns(3)
-                        medals = ["🥇 1st Place", "🥈 2nd Place", "🥉 3rd Place"]
-                        
-                        # Use itertuples() carefully by accessing specific column names string-indexed safely
-                        for idx, row in enumerate(top_readers.itertuples(index=False)):
-                            if idx < len(cols_dash):
-                                with cols_dash[idx]:
-                                    st.metric(
-                                        label=f"{medals[idx]} ({getattr(row, 'Form Class')})",
-                                        value=f"{getattr(row, 'Student Name')}",
-                                        delta=f"{int(getattr(row, 'Amount of Reading Articles Done'))} Articles"
-                                    )
-                        
-                        st.markdown("#### Detailed Leaderboard View")
-                        st.dataframe(
-                            top_readers.rename(columns={"Amount of Reading Articles Done": "Total Articles Read"}), 
-                            use_container_width=True, 
-                            hide_index=True
-                        )
-                    else:
-                        st.info("No reading data records found yet to calculate top readers.")
-                else:
-                    st.info("Database is currently empty. Start logging to generate the leaderboard!")
-                    
-            except Exception as e:
-                st.error(f"Could not load leaderboard stats: {e}")
-        
-        st.markdown("---")
-
-        # 🛰️ FETCH REGISTRY DYNAMICALLY
+        # 🛰️ FETCH REGISTRY DATA FIRST (To use for both Leaderboard & Form Dropdowns)
         try:
             registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
             registry_data = registry_sheet.get_all_records()
             
+            # Build the class registry dict for dropdowns
             class_registry = {}
             for row in registry_data:
-                form_class = str(row.get("Form Class", "")).strip()
-                student_name = str(row.get("Student Name", "")).strip()
+                # Clean up column spaces dynamically to capture keys safely
+                clean_row = {str(k).strip(): v for k, v in row.items()}
+                
+                # Use flexible keys to match "Form (" column safely
+                form_key = [k for k in clean_row.keys() if "Form" in k]
+                form_class = str(clean_row.get(form_key[0], "")).strip() if form_key else ""
+                student_name = str(clean_row.get("Student Name", "")).strip()
+                
                 if form_class and student_name:
                     if form_class not in class_registry:
                         class_registry[form_class] = []
                     class_registry[form_class].append(student_name)
+                    
+            # --- 🏆 TOP 3 READERS LEADERBOARD ENGINE FROM REGISTRY ---
+            with st.expander("🏆 View Current Top 3 Reading Leaderboard", expanded=False):
+                st.markdown("### 🥇 Top 3 Readers of this Cohort")
+                if registry_data:
+                    df_reg = pd.DataFrame(registry_data)
+                    # Clean trailing whitespaces from headers
+                    df_reg.columns = [str(col).strip() for col in df_reg.columns]
+                    
+                    # Identify Form Class column flexible header mapping
+                    f_col = [c for c in df_reg.columns if "Form" in c][0]
+                    
+                    if "Student Name" in df_reg.columns and "TOTAL" in df_reg.columns:
+                        # Enforce numeric typing on Totals column
+                        df_reg["TOTAL"] = pd.to_numeric(df_reg["TOTAL"], errors='coerce').fillna(0)
+                        
+                        # Sort to find the highest total scores
+                        top_readers = df_reg.sort_values(by="TOTAL", ascending=False).head(3)
+                        
+                        if not top_readers.empty and top_readers["TOTAL"].max() > 0:
+                            cols_dash = st.columns(3)
+                            medals = ["🥇 1st Place", "🥈 2nd Place", "🥉 3rd Place"]
+                            
+                            for idx, row in enumerate(top_readers.itertuples(index=False)):
+                                if idx < len(cols_dash):
+                                    with cols_dash[idx]:
+                                        st.metric(
+                                            label=f"{medals[idx]} ({getattr(row, f_col)})",
+                                            value=f"{getattr(row, 'Student Name')}",
+                                            delta=f"{int(getattr(row, 'TOTAL'))} Total Articles"
+                                        )
+                            
+                            st.markdown("#### Detailed Leaderboard View")
+                            display_df = top_readers[[f_col, "Student Name", "TOTAL"]].rename(
+                                columns={f_col: "Form Class", "TOTAL": "Total Articles Read"}
+                            )
+                            st.dataframe(display_df, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("No student reading records have totaled totals above 0 yet.")
+                    else:
+                        st.warning("⚠️ Column headers 'Student Name' or 'TOTAL' were not found in 'Student_Registry'.")
+                else:
+                    st.info("Student registry is currently empty.")
+                    
         except Exception as e:
+            # Safe fallback if connection fails completely
             if "BE" in target_spreadsheet:
                 class_registry = {"BE1": ["Ahmad Ali", "Dayang Siti"], "BE2": ["Chong Wei", "Nur Huda"]}
             else:
                 class_registry = {"AE1": ["Siti Aminah", "Mohammad Noor"], "AE2": ["Aliah Razak", "Khairul Amin"]}
-            st.warning(f"⚠️ Note: Could not pull data from '{target_spreadsheet}'. Showing demo entries.")
+            st.warning(f"⚠️ Note: Could not load live leaderboard registry from '{target_spreadsheet}'. Showing offline entry forms.")
+
+        st.markdown("---")
 
         # 📝 ENTRY DETAILS FIELD
         st.markdown("### 📝 Step 2: Enter Student Tally Details")
@@ -189,8 +191,6 @@ if client:
         }
         target_month_num = month_map.get(selected_month, datetime.now().month)
         current_year = datetime.now().year
-        
-        # Anchor calendar views straight to day 1 of the chosen month
         default_calendar_date = datetime(current_year, target_month_num, 1)
         
         reading_dates = []
@@ -235,7 +235,7 @@ if client:
                 
                 challenge_db.append_row(new_tally_row, value_input_option="USER_ENTERED")
                 st.success(f"🎉 Success! Recorded {article_count} articles for {selected_student} ({selected_class}) into **{target_spreadsheet}**.")
-                st.rerun() # Refresh app state to show updated leaderboard totals instantly
+                st.rerun()
                 
             except Exception as e:
                 st.error(f"Failed to record data. Please check worksheet connection. Details: {e}")
