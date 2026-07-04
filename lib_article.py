@@ -89,6 +89,57 @@ if client:
             target_spreadsheet = "Articles_Tracker_DB_AE"
             
         st.info(f"Connected to live database: **{target_spreadsheet}**")
+        
+        # --- NEW FEATURE: TOP 3 READERS LEADERBOARD ---
+        with st.expander("🏆 View Current Top 3 Reading Leaderboard", expanded=False):
+            st.markdown("### 🥇 Top 3 Readers of this Cohort")
+            try:
+                # Fetch data from the reading database worksheet
+                leaderboard_sheet = client.open(target_spreadsheet).worksheet("Reading_Article_DB")
+                raw_logs = leaderboard_sheet.get_all_records()
+                
+                if raw_logs:
+                    df_logs = pd.DataFrame(raw_logs)
+                    
+                    # Ensure column names match exactly and fix data types
+                    df_logs["Amount of Reading Articles Done"] = pd.to_numeric(
+                        df_logs["Amount of Reading Articles Done"], errors='coerce'
+                    ).fillna(0)
+                    
+                    # Group data by student and class
+                    leaderboard = df_logs.groupby(["Student Name", "Form Class"])["Amount of Reading Articles Done"].sum().reset_index()
+                    
+                    # Sort to get highest readers on top
+                    top_readers = leaderboard.sort_values(by="Amount of Reading Articles Done", ascending=False).head(3)
+                    
+                    if not top_readers.empty:
+                        cols_dash = st.columns(3)
+                        medals = ["🥇 1st Place", "🥈 2nd Place", "🥉 3rd Place"]
+                        
+                        # Use itertuples() carefully by accessing specific column names string-indexed safely
+                        for idx, row in enumerate(top_readers.itertuples(index=False)):
+                            if idx < len(cols_dash):
+                                with cols_dash[idx]:
+                                    st.metric(
+                                        label=f"{medals[idx]} ({getattr(row, 'Form Class')})",
+                                        value=f"{getattr(row, 'Student Name')}",
+                                        delta=f"{int(getattr(row, 'Amount of Reading Articles Done'))} Articles"
+                                    )
+                        
+                        st.markdown("#### Detailed Leaderboard View")
+                        st.dataframe(
+                            top_readers.rename(columns={"Amount of Reading Articles Done": "Total Articles Read"}), 
+                            use_container_width=True, 
+                            hide_index=True
+                        )
+                    else:
+                        st.info("No reading data records found yet to calculate top readers.")
+                else:
+                    st.info("Database is currently empty. Start logging to generate the leaderboard!")
+                    
+            except Exception as e:
+                st.error(f"Could not load leaderboard stats: {e}")
+        
         st.markdown("---")
 
         # 🛰️ FETCH REGISTRY DYNAMICALLY
@@ -148,7 +199,6 @@ if client:
         for i in range(int(article_count)):
             col_index = i % 4
             with cols[col_index]:
-                # Force unique keys using the month name to clear internal state history cache
                 date_val = st.date_input(
                     f"Article #{i+1} Date", 
                     value=default_calendar_date,
@@ -185,6 +235,7 @@ if client:
                 
                 challenge_db.append_row(new_tally_row, value_input_option="USER_ENTERED")
                 st.success(f"🎉 Success! Recorded {article_count} articles for {selected_student} ({selected_class}) into **{target_spreadsheet}**.")
+                st.rerun() # Refresh app state to show updated leaderboard totals instantly
                 
             except Exception as e:
                 st.error(f"Failed to record data. Please check worksheet connection. Details: {e}")
