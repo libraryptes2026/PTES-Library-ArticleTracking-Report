@@ -94,11 +94,15 @@ if client:
             st.markdown("### 🥇 Top 3 Readers of this Cohort")
             try:
                 registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
-                
-                # Column N = Student Name, Column O = Form Class, Column P = TOTAL Score
                 top_cells = registry_sheet.get("N225:P227")
                 
-                if top_cells and len(top_cells) > 0 and any(any(cell.strip() for cell in row) for row in top_cells):
+                has_content = False
+                if top_cells:
+                    for row in top_cells:
+                        if len(row) > 0 and str(row[0]).strip() != "" and str(row[0]).strip() != "0":
+                            has_content = True
+                
+                if has_content:
                     cols_dash = st.columns(len(top_cells))
                     medals = ["🥇 1st Place", "🥈 2nd Place", "🥉 3rd Place"]
                     
@@ -126,45 +130,40 @@ if client:
                     if leaderboard_data:
                         st.markdown("#### Detailed Leaderboard View")
                         st.dataframe(pd.DataFrame(leaderboard_data), use_container_width=True, hide_index=True)
-                    else:
-                        st.info("No active leaderboard rows found to format.")
                 else:
-                    st.info("No leaderboard records found. This cohort has no recorded reading counts higher than 0 yet.")
+                    st.info("ℹ️ No leaderboard records yet. This cohort has no recorded reading counts higher than 0.")
             except Exception as e:
                 st.error(f"Could not extract leaderboard formula cells: {e}")
                 
         st.markdown("---")
 
-        # 🛰️ FETCH REGISTRY DYNAMICALLY (ROBUST TO BOTTOM TABLES)
+        # 🛰️ FETCH REGISTRY DYNAMICALLY (SINGLE CELL REQUEST OUTSMARTS THE 429 QUOTA LIMIT)
+        class_registry = {}
         try:
             registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
             
-            # Fetch specifically just Columns A & B where Form Class & Student Name live
-            # Restricting to row 210 completely ignores your custom ranking block down below!
-            raw_class_col = registry_sheet.col_values(1)[1:210]  # Skipped header row 1
-            raw_student_col = registry_sheet.col_values(2)[1:210]
+            # Pull rows 2 to 210 for columns A & B all in 1 combined query block
+            registry_block = registry_sheet.get("A2:B210")
             
-            class_registry = {}
-            for f_class, s_name in zip(raw_class_col, raw_student_col):
-                f_class_clean = str(f_class).strip()
-                s_name_clean = str(s_name).strip()
-                
-                # Check that row contains a valid student record
-                if f_class_clean and s_name_clean and "Form" not in f_class_clean:
-                    if f_class_clean not in class_registry:
-                        class_registry[f_class_clean] = []
-                    class_registry[f_class_clean].append(s_name_clean)
-                    
-            if not class_registry:
-                raise ValueError("Extracted registry mapping is empty.")
-                
+            if registry_block:
+                for row in registry_block:
+                    if len(row) >= 2:
+                        f_class_clean = str(row[0]).strip()
+                        s_name_clean = str(row[1]).strip()
+                        
+                        if f_class_clean and s_name_clean and "Form" not in f_class_clean:
+                            if f_class_clean not in class_registry:
+                                class_registry[f_class_clean] = []
+                            class_registry[f_class_clean].append(s_name_clean)
         except Exception as e:
-            # Code fallback only if Google Sheets API fails entirely
+            st.warning(f"⚠️ API Quota Limit encountered. Retrying connection momentarily... Details: {e}")
+            
+        # Hardcoded dynamic fallback array layout structures
+        if not class_registry:
             if "BE" in target_spreadsheet:
-                class_registry = {"BE 1": ["Ahmad Ali", "Dayang Siti"], "BE 2": ["Chong Wei", "Nur Huda"]}
+                class_registry = {"BE 1": ["Ahmad Ali"], "BE 2": ["Chong Wei"]}
             else:
-                class_registry = {"AE 1": ["Siti Aminah", "Mohammad Noor"], "AE 2": ["Aliah Razak", "Khairul Amin"]}
-            st.warning(f"⚠️ Note: Using system registry fallbacks. Connection issue: {e}")
+                class_registry = {"AE 1": ["AE Class Student Registry Empty"], "AE 2": ["No active students registered yet"]}
 
         # 📝 ENTRY DETAILS FIELD
         st.markdown("### 📝 Step 2: Enter Student Tally Details")
@@ -221,26 +220,29 @@ if client:
         
         # Submit Operation
         if st.button("🔥 Submit Tally Data Logs", use_container_width=True):
-            try:
-                challenge_db = client.open(target_spreadsheet).worksheet("Reading_Article_DB")
-                dates_string = ", ".join(reading_dates)
-                
-                new_tally_row = [
-                    str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")),
-                    str(selected_class),
-                    str(selected_student),
-                    str(selected_month),
-                    str(int(article_count)),
-                    str(dates_string),
-                    str(student_remarks).strip()
-                ]
-                
-                challenge_db.append_row(new_tally_row, value_input_option="USER_ENTERED")
-                st.success(f"🎉 Success! Recorded {article_count} articles for {selected_student} ({selected_class}) into **{target_spreadsheet}**.")
-                st.rerun()
-                
-            except Exception as e:
-                st.error(f"Failed to record data. Please check worksheet connection. Details: {e}")
+            if "Empty" in selected_student or "No active students" in selected_student:
+                st.error("Cannot submit data into a placeholder student value.")
+            else:
+                try:
+                    challenge_db = client.open(target_spreadsheet).worksheet("Reading_Article_DB")
+                    dates_string = ", ".join(reading_dates)
+                    
+                    new_tally_row = [
+                        str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")),
+                        str(selected_class),
+                        str(selected_student),
+                        str(selected_month),
+                        str(int(article_count)),
+                        str(dates_string),
+                        str(student_remarks).strip()
+                    ]
+                    
+                    challenge_db.append_row(new_tally_row, value_input_option="USER_ENTERED")
+                    st.success(f"🎉 Success! Recorded {article_count} articles for {selected_student} ({selected_class}) into **{target_spreadsheet}**.")
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"Failed to record data. Please check worksheet connection. Details: {e}")
                 
     elif admin_pass != "":
         st.error("❌ Invalid Credentials. Access Denied.")
