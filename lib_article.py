@@ -6,7 +6,7 @@ from datetime import datetime
 
 # --- 1. PAGE CONFIGURATION & STYLING ---
 st.set_page_config(
-    page_title="PTES Reading Articles Tracker",
+    page_title="PTES Library Reading Articles",
     page_icon="📚",
     layout="wide"
 )
@@ -28,7 +28,7 @@ client = connect_to_sheets()
 # --- 3. SIDEBAR BRANDING & DIGITAL CITIZENSHIP ---
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Flag_of_Brunei.svg/180px-Flag_of_Brunei.svg.png", width=100)
-    st.title("PTES Library Services")
+    st.title("PTES Reading Articles")
     st.markdown("### 📋 System Guidelines")
     
     with st.expander("📖 Reading Articles Rules"):
