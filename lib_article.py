@@ -31,7 +31,7 @@ with st.sidebar:
     st.title("PTES Library Services")
     st.markdown("### 📋 System Guidelines")
     
-    with st.expander("📖 Reading Challenge Rules"):
+    with st.expander("📖 Reading Articles Rules"):
         st.write("""
         1. **Article Schedule:** Chief Librarian releases 24-25 articles monthly (Monday–Thursday & Saturday).
         2. **Honesty & Integrity:** Tallies must correspond strictly to verified student readings.
@@ -58,12 +58,12 @@ with st.sidebar:
             ⬜ Perseverance &nbsp; 🟥 Trustworthiness &nbsp; 🔵 Exemplary &nbsp; 🟡 Self-reliance &nbsp; 🟢
         </div>
         <div class="dev-line">
-            Web Developer: Miss Hjh Nurul Haziqah HN (Computer Science)
+            Web Developer: Miss Hjh Nurul Haziqah HN (PTES Computer Science)
         </div>
     """, unsafe_allow_html=True)
 
 # --- 4. MAIN INTERFACE LOGIC ---
-st.title("📚 PTES Annual Reading Articles Tracker")
+st.title("📚 PTES Reading Articles Tracker")
 st.markdown("Automating the tracking of student reading habits cleanly and efficiently.")
 st.markdown("---")
 
