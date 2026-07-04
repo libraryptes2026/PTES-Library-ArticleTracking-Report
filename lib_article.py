@@ -6,7 +6,7 @@ from datetime import datetime
 
 # --- 1. PAGE CONFIGURATION & STYLING ---
 st.set_page_config(
-    page_title="PTES Library Reading Articles",
+    page_title="PTES Reading Articles Tracker",
     page_icon="📚",
     layout="wide"
 )
@@ -28,7 +28,7 @@ client = connect_to_sheets()
 # --- 3. SIDEBAR BRANDING & DIGITAL CITIZENSHIP ---
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Flag_of_Brunei.svg/180px-Flag_of_Brunei.svg.png", width=100)
-    st.title("PTES Library Services")
+    st.title("PTES Library Reading Articles")
     st.markdown("### 📋 System Guidelines")
     
     with st.expander("📖 Reading Articles Rules"):
@@ -75,14 +75,14 @@ if client:
         st.success("🔓 Librarian Access Granted.")
         st.markdown("---")
         
-        # ✨ NEW COMPONENT: SINGLE GATEWAY DATABASE SELECTOR
+        # 🗂️ COHORT GATEWAY DATABASE SELECTOR
         st.markdown("### 🗂️ Step 1: Select Cohort Level")
         cohort_choice = st.selectbox(
             "Choose Student Cohort Database to open:",
             ["Lower Sixth (BE Classes)", "Upper Sixth (AE Classes)"]
         )
         
-        # Map the selector choice directly to the corresponding Google Sheet name
+        # Map choice to correct Google Sheet layout name
         if cohort_choice == "Lower Sixth (BE Classes)":
             target_spreadsheet = "Articles_Tracker_DB_BE"
         else:
@@ -91,7 +91,7 @@ if client:
         st.info(f"Connected to live database: **{target_spreadsheet}**")
         st.markdown("---")
 
-        # 🛰️ FETCH REGISTRY DYNAMICALLY BASED ON SELECTED SHEET
+        # 🛰️ FETCH REGISTRY DYNAMICALLY
         try:
             registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
             registry_data = registry_sheet.get_all_records()
@@ -105,7 +105,6 @@ if client:
                         class_registry[form_class] = []
                     class_registry[form_class].append(student_name)
         except Exception as e:
-            # Fallback data adjusts contextually to match selection visual rules
             if "BE" in target_spreadsheet:
                 class_registry = {"BE1": ["Ahmad Ali", "Dayang Siti"], "BE2": ["Chong Wei", "Nur Huda"]}
             else:
@@ -131,13 +130,30 @@ if client:
         
         st.markdown("---")
         st.write(f"📂 **5. Enter the specific calendar dates for the {int(article_count)} materials read:**")
+        
+        # 🗓️ SMART CALENDAR MONTH ANCHORING LOGIC
+        month_map = {
+            "March": 3, "April": 4, "May": 5, "June": 6, 
+            "July": 7, "August": 8, "September": 9, "October": 10
+        }
+        target_month_num = month_map.get(selected_month, datetime.now().month)
+        current_year = datetime.now().year
+        
+        # Anchor calendar views straight to day 1 of the chosen month
+        default_calendar_date = datetime(current_year, target_month_num, 1)
+        
         reading_dates = []
         cols = st.columns(4)
         
         for i in range(int(article_count)):
             col_index = i % 4
             with cols[col_index]:
-                date_val = st.date_input(f"Article #{i+1} Date", key=f"challenge_date_{i}")
+                # Force calendar dropdown window to load on the anchored target month layout
+                date_val = st.date_input(
+                    f"Article #{i+1} Date", 
+                    value=default_calendar_date,
+                    key=f"challenge_date_{i}"
+                )
                 reading_dates.append(date_val.strftime("%d/%m/%Y"))
         
         st.markdown("---")
@@ -154,7 +170,6 @@ if client:
         # Submit Operation
         if st.button("🔥 Submit Tally Data Logs", use_container_width=True):
             try:
-                # Opens whichever sheet was declared dynamically in Step 1
                 challenge_db = client.open(target_spreadsheet).worksheet("Reading_Article_DB")
                 dates_string = ", ".join(reading_dates)
                 
@@ -168,7 +183,6 @@ if client:
                     str(student_remarks).strip()
                 ]
                 
-                # Appends into the target database layout smoothly
                 challenge_db.append_row(new_tally_row, value_input_option="USER_ENTERED")
                 st.success(f"🎉 Success! Recorded {article_count} articles for {selected_student} ({selected_class}) into **{target_spreadsheet}**.")
                 
