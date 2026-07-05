@@ -270,16 +270,14 @@ if client:
 
                 # Loop through sections (or target a specific section like doc.sections[0])
                 for section in doc.sections:
-                # 1. Toggle the orientation property to landscape
-                section.orientation = WD_ORIENT.LANDSCAPE
+                    # 1. Toggle the orientation property to landscape
+                    section.orientation = WD_ORIENT.LANDSCAPE
     
-                # 2. Physically swap the dimensions (Standard Letter size example)
-                section.page_width = Inches(11.0)
-                section.page_height = Inches(8.5)
+                    # 2. Physically swap the dimensions (Standard Letter size example)
+                    section.page_width = Inches(11.0)
+                    section.page_height = Inches(8.5)
     
-                #################################
-                # Set Standard Margins (0.5 inch everywhere)
-                for section in doc.sections:
+                    # Set Standard Margins (0.5 inch everywhere)
                     section.top_margin = Inches(0.5)
                     section.bottom_margin = Inches(0.5)
                     section.left_margin = Inches(0.5)
