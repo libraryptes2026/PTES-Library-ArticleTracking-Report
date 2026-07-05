@@ -6,6 +6,8 @@ from datetime import datetime
 import io
 import docx
 from docx import Document
+from docx.enum.section import WD_ORIENT
+from docx.shared import Inches
 from docx.shared import Pt, Inches
 from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import qn, nsdecls
@@ -263,14 +265,25 @@ if client:
                 st.dataframe(display_table, use_container_width=True)
                 
                 # --- DOCUMENT GENERATION ENGINE ---
+                #################################
                 doc = Document()
-                
-                # Set Standard Margins (1 inch everywhere)
+
+                # Loop through sections (or target a specific section like doc.sections[0])
                 for section in doc.sections:
-                    section.top_margin = Inches(1)
-                    section.bottom_margin = Inches(1)
-                    section.left_margin = Inches(1)
-                    section.right_margin = Inches(1)
+                # 1. Toggle the orientation property to landscape
+                section.orientation = WD_ORIENT.LANDSCAPE
+    
+                # 2. Physically swap the dimensions (Standard Letter size example)
+                section.page_width = Inches(11.0)
+                section.page_height = Inches(8.5)
+    
+                #################################
+                # Set Standard Margins (0.5 inch everywhere)
+                for section in doc.sections:
+                    section.top_margin = Inches(0.5)
+                    section.bottom_margin = Inches(0.5)
+                    section.left_margin = Inches(0.5)
+                    section.right_margin = Inches(0.5)
                 
                 # Document Title Header Block
                 title_p = doc.add_paragraph()
