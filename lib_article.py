@@ -4,8 +4,9 @@ from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 from datetime import datetime
 import io
+import docx
 from docx import Document
-from docx.shared import Inches, Pt
+from docx.shared import Pt, Inches
 from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import qn, nsdecls
 
@@ -16,9 +17,15 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Helper Function for Word Table Borders ---
-def set_cell_margins(cell, top=100, bottom=100, left=150, right=150):
+# --- Helper Function for Pristine Administrative Formatting ---
+def format_cell_borders_and_margins(cell, top=100, bottom=100, left=150, right=150):
     tcPr = cell._tc.get_or_add_tcPr()
+    
+    # 1. Clear any native theme shading styles entirely (Enforce pure white background)
+    shading_elm = parse_xml(r'<w:shd {} w:fill="FFFFFF"/>'.format(nsdecls('w')))
+    tcPr.append(shading_elm)
+    
+    # 2. Custom Cell Padding
     tcMar = OxmlElement('w:tcMar')
     for m, val in [('top', top), ('bottom', bottom), ('left', left), ('right', right)]:
         node = OxmlElement(f'w:{m}')
@@ -26,6 +33,17 @@ def set_cell_margins(cell, top=100, bottom=100, left=150, right=150):
         node.set(qn('w:type'), 'dxa')
         tcMar.append(node)
     tcPr.append(tcMar)
+    
+    # 3. Crisp, Bold Solid Dark Borders around every cell
+    tcBorders = OxmlElement('w:tcBorders')
+    for border_name in ['top', 'left', 'bottom', 'right']:
+        border = OxmlElement(f'w:{border_name}')
+        border.set(qn('w:val'), 'single')
+        border.set(qn('w:sz'), '6')          # Clean, well-defined border thickness
+        border.set(qn('w:space'), '0')
+        border.set(qn('w:color'), '000000')  # Solid sharp black line
+        tcBorders.append(border)
+    tcPr.append(tcBorders)
 
 # --- 2. SECURE DATABASE CONNECTION (GOOGLE SHEETS) ---
 def connect_to_sheets():
@@ -91,7 +109,7 @@ if client:
         st.success("🔓 Librarian Access Granted.")
         st.markdown("---")
         
-        # 🗂️ STEP 1: GLOBAL COHORT SELECTOR (Applies to both entry and reports)
+        # 🗂️ STEP 1: GLOBAL COHORT SELECTOR
         st.markdown("### 🗂️ Step 1: Select Cohort Level")
         cohort_choice = st.selectbox(
             "Choose Student Cohort Database to access:",
@@ -111,12 +129,10 @@ if client:
             registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
             all_rows = registry_sheet.get_all_values()
             
-            # Convert raw values into a clean DataFrame for processing
             headers = all_rows[0]
             data_rows = all_rows[1:]
             df_registry = pd.DataFrame(data_rows, columns=headers)
             
-            # Reconstruct class mapping for the logging form dropdowns
             class_registry = {}
             for _, row in df_registry.iterrows():
                 form_class = str(row.get("Form Class", "")).strip()
@@ -131,7 +147,7 @@ if client:
             df_registry = pd.DataFrame()
             class_registry = {}
 
-        # 🧭 CREATING NAVIGATION TABS AT THE TOP
+        # 🧭 NAVIGATION TABS
         portal_tab1, portal_tab2 = st.tabs(["📝 Submit Tally Logs", "📊 Class Statistics Report"])
 
         # ==================== TAB 1: LOG INSERTER ====================
@@ -157,7 +173,6 @@ if client:
                 st.markdown("---")
                 st.write(f"📂 **5. Enter the specific calendar dates for the {int(article_count)} materials read:**")
                 
-                # Smart month anchoring logic
                 month_map = {
                     "March": 3, "April": 4, "May": 5, "June": 6, 
                     "July": 7, "August": 8, "September": 9, "October": 10
@@ -211,102 +226,111 @@ if client:
         # ==================== TAB 2: LIVE REPORT GENERATOR ====================
         with portal_tab2:
             st.markdown("### 📊 Class Reading Overview")
-            st.markdown("Extracts live tracking counts dynamically calculated by your `Student_Registry` Sheet formulas.")
             
             if df_registry.empty:
                 st.warning("Waiting for connection to active Google Sheet...")
             else:
-                # Class Filtering Dropdown
                 available_classes = sorted(list(df_registry["Form Class"].unique()))
                 report_class = st.selectbox("Select Target Class to View:", available_classes)
                 
-                # Identify month lists & determine dynamic cut-off based on current date
-                all_months = ["MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUG", "SEPT", "OCT"]
-                current_month_name = datetime.now().strftime("%B").upper()
+                # Chronological calendar limit check
+                ordered_months = ["MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER"]
+                current_month_idx = datetime.now().month  # Dynamic evaluation (7 for July)
                 
-                # Fallback to map standard shorthand headers if sheet has short version
-                sheet_headers = [h.upper() for h in df_registry.columns]
+                visible_columns = ["Form Class", "Student Name"]
                 
-                # Filter rows belonging strictly to selected class
+                for m_name in ordered_months:
+                    found_col = next((col for col in df_registry.columns if col.upper().startswith(m_name[:3])), None)
+                    if found_col:
+                        month_num = month_map.get(m_name.capitalize(), 12)
+                        # Only include columns up to today's current calendar month (July)
+                        if month_num <= current_month_idx:
+                            visible_columns.append(found_col)
+                
                 filtered_df = df_registry[df_registry["Form Class"] == report_class].copy()
                 
-                # Keep core identity data plus month headers that exist in sheet
-                visible_columns = ["Form Class", "Student Name"]
-                months_to_include = []
-                
-                for m in all_months:
-                    # Look for exact or partial matches in spreadsheet headers
-                    found_col = next((col for col in df_registry.columns if col.upper().startswith(m[:3])), None)
-                    if found_col:
-                        visible_columns.append(found_col)
-                        months_to_include.append(found_col)
-                        # Break dynamic display check if we reached current month
-                        if m == current_month_name or (m == "AUG" and current_month_name == "AUGUST") or (m == "SEPT" and current_month_name == "SEPTEMBER"):
-                            pass # If you want to stop exactly at today's month, uncomment 'break' below
-                            # break
-                
                 display_table = filtered_df[visible_columns].reset_index(drop=True)
+                display_table = display_table.replace(["#N/A", "nan", ""], "0")
                 
-                # Show elegant styled visual summary grid
+                # Math Processing Engine for Cumulative Sums
+                month_cols_only = [c for c in visible_columns if c not in ["Form Class", "Student Name"]]
+                for col in month_cols_only:
+                    display_table[col] = pd.to_numeric(display_table[col], errors='coerce').fillna(0).astype(int)
+                
+                # Append TOTAL Summary column on the far right edge
+                display_table["TOTAL"] = display_table[month_cols_only].sum(axis=1)
+                
                 st.dataframe(display_table, use_container_width=True)
                 
-                # --- WORD FILE GENERATION MOTOR ---
+                # --- DOCUMENT GENERATION ENGINE ---
                 doc = Document()
                 
-                # Document Title
-                title_p = doc.add_paragraph()
-                title_run = title_p.add_run(f"Pusat Tingkatan Enam Sengkurong (PTES)\nReading Articles Tally Summary Report")
-                title_run.bold = True
-                title_run.font.size = Pt(16)
-                title_run.font.name = 'Arial'
-                title_p.alignment = 1 # Center
+                # Set Standard Margins (1 inch everywhere)
+                for section in doc.sections:
+                    section.top_margin = Inches(1)
+                    section.bottom_margin = Inches(1)
+                    section.left_margin = Inches(1)
+                    section.right_margin = Inches(1)
                 
-                # Metaparameters Subtext
+                # Document Title Header Block
+                title_p = doc.add_paragraph()
+                title_run = title_p.add_run("PUSAT TINGKATAN ENAM SENGKURONG\nSTUDENT READING ARTICLES SUMMARY REPORT")
+                title_run.bold = True
+                title_run.font.size = Pt(12)
+                title_run.font.name = 'Arial'
+                title_run.font.color.rgb = docx.shared.RGBColor(0, 0, 0)
+                title_p.alignment = 1
+                
                 meta_p = doc.add_paragraph()
-                meta_run = meta_p.add_run(f"Cohort: {cohort_choice}  |  Class Target: {report_class}\nGenerated On: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
-                meta_run.font.size = Pt(10)
+                meta_run = meta_p.add_run(f"CLASS: {report_class}  |  DATABASE COHORT: {cohort_choice.upper()}\nREPORT GENERATED ON: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+                meta_run.font.size = Pt(9.5)
                 meta_run.italic = True
+                meta_run.font.color.rgb = docx.shared.RGBColor(0, 0, 0)
                 meta_p.alignment = 1
                 
                 doc.add_paragraph().paragraph_format.space_after = Pt(12)
                 
-                # Build Word Table structure matching web matrix data
-                cols_count = len(visible_columns)
-                table = doc.add_table(rows=1, cols=cols_count)
-                table.style = 'Light Shading Accent 1'
+                word_cols = list(display_table.columns)
+                table = doc.add_table(rows=1, cols=len(word_cols))
+                table.autofit = True
                 
-                # Insert Headers with nice sizing
+                # Header formatting: ALL-CAPS, BOLD, BLACK TEXT, WHITE BACKGROUND
                 hdr_cells = table.rows[0].cells
-                for idx, col_name in enumerate(visible_columns):
-                    hdr_cells[idx].text = str(col_name)
-                    hdr_cells[idx].paragraphs[0].runs[0].font.bold = True
-                    hdr_cells[idx].paragraphs[0].runs[0].font.size = Pt(10)
-                    set_cell_margins(hdr_cells[idx], top=120, bottom=120, left=150, right=150)
-                    
-                    # Apply a classy navy dark blue fill color to header
-                    shading_elm = parse_xml(r'<w:shd {} w:fill="1F497D"/>'.format(nsdecls('w')))
-                    hdr_cells[idx]._tc.get_or_add_tcPr().append(shading_elm)
-                    hdr_cells[idx].paragraphs[0].runs[0].font.color.rgb = docx.shared.RGBColor(255, 255, 255) if 'docx' in globals() else None
+                for idx, col_name in enumerate(word_cols):
+                    hdr_cells[idx].text = str(col_name).upper()
+                    run = hdr_cells[idx].paragraphs[0].runs[0]
+                    run.font.bold = True
+                    run.font.size = Pt(10)
+                    run.font.name = 'Arial'
+                    run.font.color.rgb = docx.shared.RGBColor(0, 0, 0) # Solid Black Text
+                    format_cell_borders_and_margins(hdr_cells[idx], top=120, bottom=120, left=150, right=150)
                 
-                # Populate Data Rows
+                # Table rows data filling
                 for _, row in display_table.iterrows():
                     row_cells = table.add_row().cells
-                    for idx, col_name in enumerate(visible_columns):
+                    for idx, col_name in enumerate(word_cols):
                         val_str = str(row[col_name])
-                        # If count is 0 or empty, display a clean hyphen or 0 cleanly
-                        row_cells[idx].text = val_str if val_str.strip() != "" else "0"
-                        row_cells[idx].paragraphs[0].runs[0].font.size = Pt(9.5)
-                        set_cell_margins(row_cells[idx], top=80, bottom=80, left=150, right=150)
+                        row_cells[idx].text = val_str
+                        
+                        run = row_cells[idx].paragraphs[0].runs[0]
+                        run.font.size = Pt(9.5)
+                        run.font.name = 'Arial'
+                        run.font.color.rgb = docx.shared.RGBColor(0, 0, 0)
+                        
+                        # Emphasize values under the total column
+                        if col_name == "TOTAL":
+                            run.font.bold = True
+                            
+                        format_cell_borders_and_margins(row_cells[idx], top=100, bottom=100, left=150, right=150)
                 
-                # Save into in-memory stream object for download handling
+                # Compress into file-stream memory buffer
                 doc_io = io.BytesIO()
                 doc.save(doc_io)
                 doc_io.seek(0)
                 
                 st.markdown("---")
-                # 📥 ELEGANT ACTIONABLE DOWNLOAD CONTAINER BUTTON
                 st.download_button(
-                    label=f"📥 Download {report_class} Reading Summary (.docx)",
+                    label=f"📥 Download Official {report_class} Reading Summary (.docx)",
                     data=doc_io,
                     file_name=f"PTES_Reading_Report_{report_class}_{datetime.now().strftime('%b%Y')}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
