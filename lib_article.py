@@ -6,11 +6,9 @@ from datetime import datetime
 import io
 import docx
 from docx import Document
-from docx.shared import Pt, Inches, RGBColor
-from docx.enum.section import WD_ORIENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
+from docx.shared import Pt, Inches
+from docx.oxml import OxmlElement, parse_xml
+from docx.oxml.ns import qn, nsdecls
 
 # --- 1. PAGE CONFIGURATION & STYLING ---
 st.set_page_config(
@@ -19,25 +17,33 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Helper Function to Add Page Number Field to Word Header ---
-def add_page_number_to_header(header):
-    header_p = header.paragraphs[0]
-    header_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+# --- Helper Function for Pristine Administrative Formatting ---
+def format_cell_borders_and_margins(cell, top=100, bottom=100, left=150, right=150):
+    tcPr = cell._tc.get_or_add_tcPr()
     
-    fldChar1 = OxmlElement('w:fldChar')
-    fldChar1.set(qn('w:fldCharType'), 'begin')
-    instrText = OxmlElement('w:instrText')
-    instrText.set(qn('xml:space'), 'preserve')
-    instrText.text = "PAGE"
-    fldChar2 = OxmlElement('w:fldChar')
-    fldChar2.set(qn('w:fldCharType'), 'separate')
-    fldChar3 = OxmlElement('w:fldChar')
-    fldChar3.set(qn('w:fldCharType'), 'end')
+    # 1. Clear any native theme shading styles entirely (Enforce pure white background)
+    shading_elm = parse_xml(r'<w:shd {} w:fill="FFFFFF"/>'.format(nsdecls('w')))
+    tcPr.append(shading_elm)
     
-    header_p._p.append(fldChar1)
-    header_p._p.append(instrText)
-    header_p._p.append(fldChar2)
-    header_p._p.append(fldChar3)
+    # 2. Custom Cell Padding
+    tcMar = OxmlElement('w:tcMar')
+    for m, val in [('top', top), ('bottom', bottom), ('left', left), ('right', right)]:
+        node = OxmlElement(f'w:{m}')
+        node.set(qn('w:w'), str(val))
+        node.set(qn('w:type'), 'dxa')
+        tcMar.append(node)
+    tcPr.append(tcMar)
+    
+    # 3. Crisp, Bold Solid Dark Borders around every cell
+    tcBorders = OxmlElement('w:tcBorders')
+    for border_name in ['top', 'left', 'bottom', 'right']:
+        border = OxmlElement(f'w:{border_name}')
+        border.set(qn('w:val'), 'single')
+        border.set(qn('w:sz'), '6')          # Clean, well-defined border thickness
+        border.set(qn('w:space'), '0')
+        border.set(qn('w:color'), '000000')  # Solid sharp black line
+        tcBorders.append(border)
+    tcPr.append(tcBorders)
 
 # --- 2. SECURE DATABASE CONNECTION (GOOGLE SHEETS) ---
 def connect_to_sheets():
@@ -229,7 +235,7 @@ if client:
                 
                 # Chronological calendar limit check
                 ordered_months = ["MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER"]
-                current_month_idx = datetime.now().month
+                current_month_idx = datetime.now().month  # Dynamic evaluation (7 for July)
                 
                 visible_columns = ["Form Class", "Student Name"]
                 
@@ -237,6 +243,7 @@ if client:
                     found_col = next((col for col in df_registry.columns if col.upper().startswith(m_name[:3])), None)
                     if found_col:
                         month_num = month_map.get(m_name.capitalize(), 12)
+                        # Only include columns up to today's current calendar month (July)
                         if month_num <= current_month_idx:
                             visible_columns.append(found_col)
                 
@@ -258,60 +265,45 @@ if client:
                 # --- DOCUMENT GENERATION ENGINE ---
                 doc = Document()
                 
-                # Setup Global Structural Specifications (Letter Size, Landscape, 0.5" Margins)
+                # Set Standard Margins (1 inch everywhere)
                 for section in doc.sections:
-                    section.orientation = WD_ORIENT.LANDSCAPE
-                    section.page_width = Inches(11.0)
-                    section.page_height = Inches(8.5)
-                    
-                    # Set 0.5 margins perfectly across all 4 corners
-                    section.top_margin = Inches(0.5)
-                    section.bottom_margin = Inches(0.5)
-                    section.left_margin = Inches(0.5)
-                    section.right_margin = Inches(0.5)
-                    
-                    # Insert dynamic page number field at top center
-                    add_page_number_to_header(section.header)
+                    section.top_margin = Inches(1)
+                    section.bottom_margin = Inches(1)
+                    section.left_margin = Inches(1)
+                    section.right_margin = Inches(1)
                 
                 # Document Title Header Block
                 title_p = doc.add_paragraph()
-                title_p.paragraph_format.space_before = Pt(0)
-                title_p.paragraph_format.space_after = Pt(2)
                 title_run = title_p.add_run("PUSAT TINGKATAN ENAM SENGKURONG\nSTUDENT READING ARTICLES SUMMARY REPORT")
                 title_run.bold = True
                 title_run.font.size = Pt(12)
                 title_run.font.name = 'Arial'
-                title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                title_run.font.color.rgb = docx.shared.RGBColor(0, 0, 0)
+                title_p.alignment = 1
                 
                 meta_p = doc.add_paragraph()
-                meta_p.paragraph_format.space_after = Pt(12)
                 meta_run = meta_p.add_run(f"CLASS: {report_class}  |  DATABASE COHORT: {cohort_choice.upper()}\nREPORT GENERATED ON: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
                 meta_run.font.size = Pt(9.5)
                 meta_run.italic = True
-                meta_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                meta_run.font.color.rgb = docx.shared.RGBColor(0, 0, 0)
+                meta_p.alignment = 1
+                
+                doc.add_paragraph().paragraph_format.space_after = Pt(12)
                 
                 word_cols = list(display_table.columns)
-                
-                # 'Table Grid' baseline style provides solid clean borders out-of-the-box safely
-                table = doc.add_table(rows=1, cols=len(word_cols), style='Table Grid')
+                table = doc.add_table(rows=1, cols=len(word_cols))
                 table.autofit = True
                 
-                # Header formatting: CENTERED, ALL-CAPS, BOLD, BLACK TEXT
+                # Header formatting: ALL-CAPS, BOLD, BLACK TEXT, WHITE BACKGROUND
                 hdr_cells = table.rows[0].cells
                 for idx, col_name in enumerate(word_cols):
                     hdr_cells[idx].text = str(col_name).upper()
-                    p = hdr_cells[idx].paragraphs[0]
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    
-                    # Native vertical padding simulation via space configurations
-                    p.paragraph_format.space_before = Pt(6)
-                    p.paragraph_format.space_after = Pt(6)
-                    
-                    run = p.runs[0]
+                    run = hdr_cells[idx].paragraphs[0].runs[0]
                     run.font.bold = True
                     run.font.size = Pt(10)
                     run.font.name = 'Arial'
-                    run.font.color.rgb = RGBColor(0, 0, 0)
+                    run.font.color.rgb = docx.shared.RGBColor(0, 0, 0) # Solid Black Text
+                    format_cell_borders_and_margins(hdr_cells[idx], top=120, bottom=120, left=150, right=150)
                 
                 # Table rows data filling
                 for _, row in display_table.iterrows():
@@ -320,23 +312,16 @@ if client:
                         val_str = str(row[col_name])
                         row_cells[idx].text = val_str
                         
-                        p = row_cells[idx].paragraphs[0]
-                        p.paragraph_format.space_before = Pt(4)
-                        p.paragraph_format.space_after = Pt(4)
-                        
-                        # Content Alignment Rules
-                        if col_name not in ["Form Class", "Student Name"]:
-                            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        else:
-                            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                            
-                        run = p.runs[0]
+                        run = row_cells[idx].paragraphs[0].runs[0]
                         run.font.size = Pt(9.5)
                         run.font.name = 'Arial'
-                        run.font.color.rgb = RGBColor(0, 0, 0)
+                        run.font.color.rgb = docx.shared.RGBColor(0, 0, 0)
                         
+                        # Emphasize values under the total column
                         if col_name == "TOTAL":
                             run.font.bold = True
+                            
+                        format_cell_borders_and_margins(row_cells[idx], top=100, bottom=100, left=150, right=150)
                 
                 # Compress into file-stream memory buffer
                 doc_io = io.BytesIO()
@@ -345,12 +330,12 @@ if client:
                 
                 st.markdown("---")
                 st.download_button(
-                    label=f"📥 Download Official Landscape {report_class} Summary Document (.docx)",
+                    label=f"📥 Download Official {report_class} Reading Summary (.docx)",
                     data=doc_io,
                     file_name=f"PTES_Reading_Report_{report_class}_{datetime.now().strftime('%b%Y')}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True
                 )
                 
-elif admin_pass != "":
-    st.error("❌ Invalid Credentials. Access Denied.")
+    elif admin_pass != "":
+        st.error("❌ Invalid Credentials. Access Denied.")
