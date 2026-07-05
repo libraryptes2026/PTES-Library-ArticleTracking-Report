@@ -36,7 +36,7 @@ def format_cell_borders_and_margins(cell, top=100, bottom=100, left=150, right=1
         tcMar.append(node)
     tcPr.append(tcMar)
     
-    # 3. Solid Clean Black Borders (Fixes Word corruption issues)
+    # 3. Solid Clean Black Borders
     tcBorders = OxmlElement('w:tcBorders')
     for border_name in ['top', 'left', 'bottom', 'right']:
         border = OxmlElement(f'w:{border_name}')
@@ -265,7 +265,6 @@ if client:
                     found_col = next((col for col in df_registry.columns if col.upper().startswith(m_name[:3])), None)
                     if found_col:
                         month_num = month_map.get(m_name.capitalize(), 12)
-                        # Only include columns up to today's current active month (July)
                         if month_num <= current_month_idx:
                             visible_columns.append(found_col)
                 
@@ -293,11 +292,13 @@ if client:
                     section.page_width = Inches(11.0)
                     section.page_height = Inches(8.5)
                     
+                    # Set 0.5 margins perfectly across all 4 corners
                     section.top_margin = Inches(0.5)
                     section.bottom_margin = Inches(0.5)
                     section.left_margin = Inches(0.5)
                     section.right_margin = Inches(0.5)
                     
+                    # Insert dynamic page number field at top center
                     add_page_number_to_header(section.header)
                 
                 # Document Title Header Block
@@ -319,7 +320,7 @@ if client:
                 doc.add_paragraph().paragraph_format.space_after = Pt(8)
                 
                 word_cols = list(display_table.columns)
-                # Using 'Normal Table' baseline styles stops Word layout structure corruption errors entirely
+                # Using 'Normal Table' baseline style prevents open/load corruption issues
                 table = doc.add_table(rows=1, cols=len(word_cols), style='Normal Table')
                 table.autofit = True
                 
@@ -328,7 +329,7 @@ if client:
                 for idx, col_name in enumerate(word_cols):
                     hdr_cells[idx].text = str(col_name).upper()
                     p = hdr_cells[idx].paragraphs[0]
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER  # Centered Header text
                     
                     run = p.runs[0]
                     run.font.bold = True
@@ -345,7 +346,8 @@ if client:
                         row_cells[idx].text = val_str
                         
                         p = row_cells[idx].paragraphs[0]
-                        # Center months and totals, Left-align student details
+                        
+                        # Rules: Centered all values in all month & total cells, left-aligned identities
                         if col_name not in ["Form Class", "Student Name"]:
                             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                         else:
