@@ -19,33 +19,44 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Clean Administrative Formatting Engine (Pure White, Sharp Black Borders) ---
+# --- Rigid Schema-Compliant Formatting Engine (Fixes Word Corruption Errors) ---
 def format_cell_borders_and_margins(cell, top=100, bottom=100, left=150, right=150):
-    tcPr = cell._tc.get_or_add_tcPr()
+    # Get the raw table cell element
+    tc = cell._tc
     
-    # 1. Enforce pure white background
+    # Create a brand new cell properties element to guarantee strict XML tag sequencing
+    new_tcPr = OxmlElement('w:tcPr')
+    
+    # 1. Background Shading (Must be sequence first)
     shading_elm = parse_xml(r'<w:shd {} w:fill="FFFFFF"/>'.format(nsdecls('w')))
-    tcPr.append(shading_elm)
+    new_tcPr.append(shading_elm)
     
-    # 2. Custom Padding (Margins)
-    tcMar = OxmlElement('w:tcMar')
-    for m, val in [('top', top), ('bottom', bottom), ('left', left), ('right', right)]:
-        node = OxmlElement(f'w:{m}')
-        node.set(qn('w:w'), str(val))
-        node.set(qn('w:type'), 'dxa')
-        tcMar.append(node)
-    tcPr.append(tcMar)
-    
-    # 3. Solid Clean Black Borders
+    # 2. Cell Borders (Must be sequenced second)
     tcBorders = OxmlElement('w:tcBorders')
     for border_name in ['top', 'left', 'bottom', 'right']:
         border = OxmlElement(f'w:{border_name}')
         border.set(qn('w:val'), 'single')
         border.set(qn('w:sz'), '6')          # Clean border thickness
         border.set(qn('w:space'), '0')
-        border.set(qn('w:color'), '000000')  # Solid sharp black
+        border.set(qn('w:color'), '000000')  # Solid sharp black line
         tcBorders.append(border)
-    tcPr.append(tcBorders)
+    new_tcPr.append(tcBorders)
+    
+    # 3. Cell Padding / Margins (Must be sequenced third)
+    tcMar = OxmlElement('w:tcMar')
+    for m, val in [('top', top), ('bottom', bottom), ('left', left), ('right', right)]:
+        node = OxmlElement(f'w:{m}')
+        node.set(qn('w:w'), str(val))
+        node.set(qn('w:type'), 'dxa')
+        tcMar.append(node)
+    new_tcPr.append(tcMar)
+    
+    # Clear out any old mismatched property element block if it exists
+    old_tcPr = tc.get_or_add_tcPr()
+    tc.remove(old_tcPr)
+    
+    # Swap in our strictly sequenced properties element block
+    tc.append(new_tcPr)
 
 # --- Helper Function to Add Page Number Field to Word Header ---
 def add_page_number_to_header(header):
@@ -257,7 +268,7 @@ if client:
                 
                 # Chronological calendar limit check
                 ordered_months = ["MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER"]
-                current_month_idx = datetime.now().month  # Dynamic evaluation (7 for July)
+                current_month_idx = datetime.now().month  # Dynamic evaluation
                 
                 visible_columns = ["Form Class", "Student Name"]
                 
