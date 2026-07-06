@@ -148,7 +148,7 @@ if client:
             df_registry = pd.DataFrame()
             class_registry = {}
 
-        # 🧭 NAVIGATION TABS (Now dynamically partitioned into 3 parts)
+        # 🧭 NAVIGATION TABS
         portal_tab1, portal_tab2, portal_tab3 = st.tabs([
             "📝 Submit Tally Logs", 
             "📊 Class Statistics Report", 
@@ -272,6 +272,17 @@ if client:
                     section.bottom_margin = Inches(0.5)
                     section.left_margin = Inches(0.5)
                     section.right_margin = Inches(0.5)
+                    
+                    # 📄 INJECT DYNAMIC PAGE NUMBER INTO FOOTER
+                    footer_p = section.footer.paragraphs[0]
+                    footer_p.alignment = 2  # Right-aligned footer
+                    footer_run = footer_p.add_run("Page ")
+                    footer_run.font.size = Pt(9)
+                    footer_run.font.name = 'Arial'
+                    
+                    # Safe programmatic XML generation logic for the dynamic Word PAGE field
+                    fldSimple = parse_xml(r'<w:fldSimple %s w:instr="PAGE"/>' % nsdecls('w'))
+                    footer_p._p.append(fldSimple)
                 
                 title_p = doc.add_paragraph()
                 title_run = title_p.add_run("PUSAT TINGKATAN ENAM SENGKURONG\nSTUDENT READING ARTICLES SUMMARY REPORT")
@@ -333,14 +344,12 @@ if client:
             st.markdown("### 🏆 Cohort Top 3 Honors Registry")
             
             try:
-                # Target the bottom formula cells
                 top_cells = registry_sheet.get("N225:P227")
                 
                 if top_cells and len(top_cells) > 0:
                     cols_dash = st.columns(len(top_cells))
                     medals = ["🥇 1st Place", "🥈 2nd Place", "🥉 3rd Place"]
                     
-                    # Create metric dashboard layout cards
                     for idx, data_row in enumerate(top_cells):
                         if len(data_row) >= 3:
                             s_name = data_row[0]
@@ -354,7 +363,6 @@ if client:
                                     delta=f"{t_score} Total Articles"
                                 )
                     
-                    # Generate DataFrame representation
                     leaderboard_data = []
                     for data_row in top_cells:
                         if len(data_row) >= 3:
@@ -380,6 +388,13 @@ if client:
                         section.bottom_margin = Inches(0.5)
                         section.left_margin = Inches(0.5)
                         section.right_margin = Inches(0.5)
+                        
+                        # Add simple page numbers here too for completeness
+                        f_p = section.footer.paragraphs[0]
+                        f_p.alignment = 2
+                        f_run = f_p.add_run("Page ")
+                        f_run.font.size = Pt(9)
+                        f_p._p.append(parse_xml(r'<w:fldSimple %s w:instr="PAGE"/>' % nsdecls('w')))
                     
                     l_title_p = leader_doc.add_paragraph()
                     l_title_run = l_title_p.add_run("PUSAT TINGKATAN ENAM SENGKURONG\nTOP READERS LEADERBOARD RECOGNITION REPORT")
