@@ -60,10 +60,10 @@ def connect_to_sheets():
 
 client = connect_to_sheets()
 
-# 🧠 --- STREAMLIT CACHING LAYER ENGINE ---
-@st.cache_data(ttl=300)  # Keeps data cached for 5 minutes to prevent Quota 429 Errors
+# 🧠 CACHED DATA FETCH ENGINES (Prevents Quota 429 Errors)
+@st.cache_data(ttl=300) # Caches data for 5 minutes
 def fetch_registry_data(target_spreadsheet):
-    """Fetches full student registry row records securely with caching."""
+    """Fetches full student registry row records with caching protection."""
     if not client:
         return []
     try:
@@ -73,9 +73,9 @@ def fetch_registry_data(target_spreadsheet):
         st.error(f"Failed pulling registry rows from {target_spreadsheet}: {e}")
         return []
 
-@st.cache_data(ttl=60)  # Leaderboard pulls refresh faster (1 minute)
+@st.cache_data(ttl=60) # Leaderboards refresh faster (1 minute)
 def fetch_leaderboard_cells(target_spreadsheet):
-    """Fetches high-velocity leaderboard ranges securely without API spamming."""
+    """Fetches high-velocity leaderboard ranges securely."""
     if not client:
         return []
     try:
@@ -378,10 +378,11 @@ if client:
             top_cells = fetch_leaderboard_cells(target_spreadsheet)
             
             if top_cells and len(top_cells) > 0:
-                # Handle temporary formula #N/A cleanups dynamically
+                # Handle formula #N/A cleanups dynamically
                 cleaned_top_cells = []
                 for row in top_cells:
                     cleaned_row = [("Awaiting Data" if val == "#N/A" or val == "" else val) for val in row]
+                    # Ensure minimum element width requirements
                     while len(cleaned_row) < 3:
                         cleaned_row.append("0")
                     cleaned_top_cells.append(cleaned_row)
