@@ -60,6 +60,31 @@ def connect_to_sheets():
 
 client = connect_to_sheets()
 
+# 🧠 --- STREAMLIT CACHING LAYER ENGINE ---
+@st.cache_data(ttl=300)  # Keeps data cached for 5 minutes to prevent Quota 429 Errors
+def fetch_registry_data(target_spreadsheet):
+    """Fetches full student registry row records securely with caching."""
+    if not client:
+        return []
+    try:
+        sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
+        return sheet.get_all_values()
+    except Exception as e:
+        st.error(f"Failed pulling registry rows from {target_spreadsheet}: {e}")
+        return []
+
+@st.cache_data(ttl=60)  # Leaderboard pulls refresh faster (1 minute)
+def fetch_leaderboard_cells(target_spreadsheet):
+    """Fetches high-velocity leaderboard ranges securely without API spamming."""
+    if not client:
+        return []
+    try:
+        sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
+        return sheet.get("N225:P227")
+    except Exception as e:
+        st.error(f"Failed pulling leaderboard cells from {target_spreadsheet}: {e}")
+        return []
+
 # --- 3. SIDEBAR BRANDING & DIGITAL CITIZENSHIP ---
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Flag_of_Brunei.svg/180px-Flag_of_Brunei.svg.png", width=100)
@@ -110,6 +135,10 @@ if client:
         st.success("🔓 Librarian Access Granted.")
         st.markdown("---")
         
+        # Track cohort selection state to handle clean dropdown rebuilds
+        if "current_cohort" not in st.session_state:
+            st.session_state["current_cohort"] = "Lower Sixth (BE Classes)"
+
         # 🗂️ STEP 1: GLOBAL COHORT SELECTOR
         st.markdown("### 🗂️ Step 1: Select Cohort Level")
         cohort_choice = st.selectbox(
@@ -117,6 +146,15 @@ if client:
             ["Lower Sixth (BE Classes)", "Upper Sixth (AE Classes)"]
         )
         
+        # Clear selected choices if cohort is switched to guarantee proper mapping
+        if cohort_choice != st.session_state["current_cohort"]:
+            st.session_state["current_cohort"] = cohort_choice
+            if "challenge_class" in st.session_state:
+                del st.session_state["challenge_class"]
+            if "challenge_student" in st.session_state:
+                del st.session_state["challenge_student"]
+            st.rerun()
+            
         if cohort_choice == "Lower Sixth (BE Classes)":
             target_spreadsheet = "Articles_Tracker_DB_BE"
         else:
@@ -125,11 +163,10 @@ if client:
         st.info(f"Connected to live database: **{target_spreadsheet}**")
         st.markdown("---")
 
-        # 🛰️ FETCH FULL REGISTRY DATA
-        try:
-            registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
-            all_rows = registry_sheet.get_all_values()
-            
+        # 🛰️ FETCH DATA THROUGH THE CACHED ENGINE
+        all_rows = fetch_registry_data(target_spreadsheet)
+        
+        if all_rows and len(all_rows) > 0:
             headers = all_rows[0]
             data_rows = all_rows[1:]
             df_registry = pd.DataFrame(data_rows, columns=headers)
@@ -142,9 +179,7 @@ if client:
                     if form_class not in class_registry:
                         class_registry[form_class] = []
                     class_registry[form_class].append(student_name)
-                    
-        except Exception as e:
-            st.error(f"Error accessing Google Sheet: {e}")
+        else:
             df_registry = pd.DataFrame()
             class_registry = {}
 
@@ -158,7 +193,7 @@ if client:
         # ==================== TAB 1: LOG INSERTER ====================
         with portal_tab1:
             if not class_registry:
-                st.warning("No registry data found. Please check your Google Sheet tabs.")
+                st.warning("No registry data found. Please ensure your Google Sheet tab is named 'Student_Registry'.")
             else:
                 st.markdown("### 📝 Enter Student Tally Details")
                 col1, col2 = st.columns(2)
@@ -233,7 +268,7 @@ if client:
             st.markdown("### 📊 Class Reading Overview")
             
             if df_registry.empty:
-                st.warning("Waiting for connection to active Google Sheet...")
+                st.warning("Waiting for connection to active Google Sheet database records...")
             else:
                 available_classes = sorted(list(df_registry["Form Class"].unique()))
                 available_classes = [c for c in available_classes if c and not str(c).startswith("TOP")]
@@ -273,14 +308,12 @@ if client:
                     section.left_margin = Inches(0.5)
                     section.right_margin = Inches(0.5)
                     
-                    # 📄 INJECT DYNAMIC PAGE NUMBER INTO FOOTER
                     footer_p = section.footer.paragraphs[0]
-                    footer_p.alignment = 2  # Right-aligned footer
+                    footer_p.alignment = 2  
                     footer_run = footer_p.add_run("Page ")
                     footer_run.font.size = Pt(9)
                     footer_run.font.name = 'Arial'
                     
-                    # Safe programmatic XML generation logic for the dynamic Word PAGE field
                     fldSimple = parse_xml(r'<w:fldSimple %s w:instr="PAGE"/>' % nsdecls('w'))
                     footer_p._p.append(fldSimple)
                 
@@ -310,7 +343,6 @@ if client:
                     run.font.bold = True
                     run.font.size = Pt(10)
                     run.font.name = 'Arial'
-                    run.font.color.rgb = docx.shared.RGBColor(0, 0, 0)
                     format_cell_borders_and_margins(hdr_cells[idx], top=120, bottom=120, left=150, right=150)
                 
                 for _, row in display_table.iterrows():
@@ -321,7 +353,6 @@ if client:
                         run = row_cells[idx].paragraphs[0].runs[0]
                         run.font.size = Pt(9.5)
                         run.font.name = 'Arial'
-                        run.font.color.rgb = docx.shared.RGBColor(0, 0, 0)
                         if col_name == "TOTAL":
                             run.font.bold = True
                         format_cell_borders_and_margins(row_cells[idx], top=100, bottom=100, left=150, right=150)
@@ -343,118 +374,119 @@ if client:
         with portal_tab3:
             st.markdown("### 🏆 Cohort Top 3 Honors Registry")
             
-            try:
-                top_cells = registry_sheet.get("N225:P227")
+            # Use cached engine to check formula outputs securely
+            top_cells = fetch_leaderboard_cells(target_spreadsheet)
+            
+            if top_cells and len(top_cells) > 0:
+                # Handle temporary formula #N/A cleanups dynamically
+                cleaned_top_cells = []
+                for row in top_cells:
+                    cleaned_row = [("Awaiting Data" if val == "#N/A" or val == "" else val) for val in row]
+                    while len(cleaned_row) < 3:
+                        cleaned_row.append("0")
+                    cleaned_top_cells.append(cleaned_row)
+
+                cols_dash = st.columns(len(cleaned_top_cells))
+                medals = ["🥇 1st Place", "🥈 2nd Place", "🥉 3rd Place"]
                 
-                if top_cells and len(top_cells) > 0:
-                    cols_dash = st.columns(len(top_cells))
-                    medals = ["🥇 1st Place", "🥈 2nd Place", "🥉 3rd Place"]
+                for idx, data_row in enumerate(cleaned_top_cells):
+                    s_name = data_row[0]
+                    f_class = data_row[1]
+                    t_score = data_row[2]
                     
-                    for idx, data_row in enumerate(top_cells):
-                        if len(data_row) >= 3:
-                            s_name = data_row[0]
-                            f_class = data_row[1]
-                            t_score = data_row[2]
-                            
-                            with cols_dash[idx]:
-                                st.metric(
-                                    label=f"{medals[idx]} ({f_class})",
-                                    value=f"{s_name}",
-                                    delta=f"{t_score} Total Articles"
-                                )
+                    with cols_dash[idx]:
+                        st.metric(
+                            label=f"{medals[idx]} ({f_class})",
+                            value=f"{s_name}",
+                            delta=f"{t_score} Total Articles"
+                        )
+                
+                leaderboard_data = []
+                for idx, data_row in enumerate(cleaned_top_cells):
+                    leaderboard_data.append({
+                        "Rank Placement": medals[idx],
+                        "Form Class": data_row[1],
+                        "Student Name": data_row[0],
+                        "Total Articles Read": data_row[2]
+                    })
+                
+                df_leaderboard = pd.DataFrame(leaderboard_data)
+                st.markdown("---")
+                st.markdown("#### Detailed Leaderboard View")
+                st.dataframe(df_leaderboard, use_container_width=True, hide_index=True)
+                
+                # --- TAB 3 LANDSCAPE DOCUMENT GENERATOR ---
+                leader_doc = Document()
+                for section in leader_doc.sections:
+                    section.orientation = WD_ORIENT.LANDSCAPE
+                    section.page_width = Inches(11.0)
+                    section.page_height = Inches(8.5)
+                    section.top_margin = Inches(0.5)
+                    section.bottom_margin = Inches(0.5)
+                    section.left_margin = Inches(0.5)
+                    section.right_margin = Inches(0.5)
                     
-                    leaderboard_data = []
-                    for data_row in top_cells:
-                        if len(data_row) >= 3:
-                            leaderboard_data.append({
-                                "Rank Placement": medals[len(leaderboard_data)],
-                                "Form Class": data_row[1],
-                                "Student Name": data_row[0],
-                                "Total Articles Read": int(data_row[2]) if str(data_row[2]).isdigit() else data_row[2]
-                            })
-                    
-                    df_leaderboard = pd.DataFrame(leaderboard_data)
-                    st.markdown("---")
-                    st.markdown("#### Detailed Leaderboard View")
-                    st.dataframe(df_leaderboard, use_container_width=True, hide_index=True)
-                    
-                    # --- TAB 3 LANDSCAPE DOCUMENT GENERATOR ---
-                    leader_doc = Document()
-                    for section in leader_doc.sections:
-                        section.orientation = WD_ORIENT.LANDSCAPE
-                        section.page_width = Inches(11.0)
-                        section.page_height = Inches(8.5)
-                        section.top_margin = Inches(0.5)
-                        section.bottom_margin = Inches(0.5)
-                        section.left_margin = Inches(0.5)
-                        section.right_margin = Inches(0.5)
-                        
-                        # Add simple page numbers here too for completeness
-                        f_p = section.footer.paragraphs[0]
-                        f_p.alignment = 2
-                        f_run = f_p.add_run("Page ")
-                        f_run.font.size = Pt(9)
-                        f_p._p.append(parse_xml(r'<w:fldSimple %s w:instr="PAGE"/>' % nsdecls('w')))
-                    
-                    l_title_p = leader_doc.add_paragraph()
-                    l_title_run = l_title_p.add_run("PUSAT TINGKATAN ENAM SENGKURONG\nTOP READERS LEADERBOARD RECOGNITION REPORT")
-                    l_title_run.bold = True
-                    l_title_run.font.size = Pt(12)
-                    l_title_run.font.name = 'Arial'
-                    l_title_p.alignment = 1
-                    
-                    l_meta_p = leader_doc.add_paragraph()
-                    l_meta_run = l_meta_p.add_run(f"COHORT GATEWAY: {cohort_choice.upper()}\nREPORT EXTRACTED ON: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
-                    l_meta_run.font.size = Pt(9.5)
-                    l_meta_run.italic = True
-                    l_meta_p.alignment = 1
-                    
-                    leader_doc.add_paragraph().paragraph_format.space_after = Pt(12)
-                    
-                    l_word_cols = list(df_leaderboard.columns)
-                    l_table = leader_doc.add_table(rows=1, cols=len(l_word_cols))
-                    l_table.autofit = True
-                    
-                    l_hdr_cells = l_table.rows[0].cells
+                    f_p = section.footer.paragraphs[0]
+                    f_p.alignment = 2
+                    f_run = f_p.add_run("Page ")
+                    f_run.font.size = Pt(9)
+                    f_p._p.append(parse_xml(r'<w:fldSimple %s w:instr="PAGE"/>' % nsdecls('w')))
+                
+                l_title_p = leader_doc.add_paragraph()
+                l_title_run = l_title_p.add_run("PUSAT TINGKATAN ENAM SENGKURONG\nTOP READERS LEADERBOARD RECOGNITION REPORT")
+                l_title_run.bold = True
+                l_title_run.font.size = Pt(12)
+                l_title_run.font.name = 'Arial'
+                l_title_p.alignment = 1
+                
+                l_meta_p = leader_doc.add_paragraph()
+                l_meta_run = l_meta_p.add_run(f"COHORT GATEWAY: {cohort_choice.upper()}\nREPORT EXTRACTED ON: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+                l_meta_run.font.size = Pt(9.5)
+                l_meta_run.italic = True
+                l_meta_p.alignment = 1
+                
+                leader_doc.add_paragraph().paragraph_format.space_after = Pt(12)
+                
+                l_word_cols = list(df_leaderboard.columns)
+                l_table = leader_doc.add_table(rows=1, cols=len(l_word_cols))
+                l_table.autofit = True
+                
+                l_hdr_cells = l_table.rows[0].cells
+                for idx, col_name in enumerate(l_word_cols):
+                    l_hdr_cells[idx].text = str(col_name).upper()
+                    run = l_hdr_cells[idx].paragraphs[0].runs[0]
+                    run.font.bold = True
+                    run.font.size = Pt(10)
+                    run.font.name = 'Arial'
+                    format_cell_borders_and_margins(l_hdr_cells[idx], top=120, bottom=120, left=150, right=150)
+                
+                for _, row in df_leaderboard.iterrows():
+                    l_row_cells = l_table.add_row().cells
                     for idx, col_name in enumerate(l_word_cols):
-                        l_hdr_cells[idx].text = str(col_name).upper()
-                        run = l_hdr_cells[idx].paragraphs[0].runs[0]
-                        run.font.bold = True
-                        run.font.size = Pt(10)
+                        val_str = str(row[col_name])
+                        l_row_cells[idx].text = val_str
+                        run = l_row_cells[idx].paragraphs[0].runs[0]
+                        run.font.size = Pt(9.5)
                         run.font.name = 'Arial'
-                        run.font.color.rgb = docx.shared.RGBColor(0, 0, 0)
-                        format_cell_borders_and_margins(l_hdr_cells[idx], top=120, bottom=120, left=150, right=150)
-                    
-                    for _, row in df_leaderboard.iterrows():
-                        l_row_cells = l_table.add_row().cells
-                        for idx, col_name in enumerate(l_word_cols):
-                            val_str = str(row[col_name])
-                            l_row_cells[idx].text = val_str
-                            run = l_row_cells[idx].paragraphs[0].runs[0]
-                            run.font.size = Pt(9.5)
-                            run.font.name = 'Arial'
-                            run.font.color.rgb = docx.shared.RGBColor(0, 0, 0)
-                            if col_name == "Total Articles Read":
-                                run.font.bold = True
-                            format_cell_borders_and_margins(l_row_cells[idx], top=100, bottom=100, left=150, right=150)
-                    
-                    l_doc_io = io.BytesIO()
-                    leader_doc.save(l_doc_io)
-                    l_doc_io.seek(0)
-                    
-                    st.markdown("---")
-                    st.download_button(
-                        label="📥 Download Official Landscape Leaderboard Report (.docx)",
-                        data=l_doc_io,
-                        file_name=f"PTES_Leaderboard_{cohort_choice.replace(' ', '_')}_{datetime.now().strftime('%b%Y')}.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True,
-                        key="leaderboard_download_btn"
-                    )
-                else:
-                    st.info("No leaderboard records found. Ensure your formulas are loaded in cells N225:P227.")
-            except Exception as e:
-                st.error(f"Could not extract leaderboard formula cells: {e}")
+                        if col_name == "Total Articles Read":
+                            run.font.bold = True
+                        format_cell_borders_and_margins(l_row_cells[idx], top=100, bottom=100, left=150, right=150)
+                
+                l_doc_io = io.BytesIO()
+                leader_doc.save(l_doc_io)
+                l_doc_io.seek(0)
+                
+                st.markdown("---")
+                st.download_button(
+                    label="📥 Download Official Landscape Leaderboard Report (.docx)",
+                    data=l_doc_io,
+                    file_name=f"PTES_Leaderboard_{cohort_choice.replace(' ', '_')}_{datetime.now().strftime('%b%Y')}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                    key="leaderboard_download_btn"
+                )
+            else:
+                st.info("No leaderboard records found. Please ensure your formulas are loaded in cells N225:P227.")
 
     elif admin_pass != "":
         st.error("❌ Invalid Credentials. Access Denied.")
