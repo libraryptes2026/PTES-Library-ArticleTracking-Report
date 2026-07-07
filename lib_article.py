@@ -60,26 +60,30 @@ def connect_to_sheets():
 
 client = connect_to_sheets()
 
-# 🧠 ---STREAMLIT CACHING ENGINE WITH EXPLICIT KEY HASHING---
-@st.cache_data(ttl=300, hash_funcs={gspread.client.Client: lambda _: None})
-def fetch_registry_data(target_spreadsheet, _gspread_client):
+# 🧠 ---STREAMLIT CACHING ENGINE WITH COHORT SWITCHING ISOLATION---
+@st.cache_data(ttl=300)
+def fetch_registry_data(target_spreadsheet):
     """Fetches full student registry row records securely with caching."""
-    if not _gspread_client:
-        return []
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds_info = st.secrets["gspread_creds"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
+    local_client = gspread.authorize(creds)
     try:
-        sheet = _gspread_client.open(target_spreadsheet).worksheet("Student_Registry")
+        sheet = local_client.open(target_spreadsheet).worksheet("Student_Registry")
         return sheet.get_all_values()
     except Exception as e:
         st.error(f"Failed pulling registry rows from {target_spreadsheet}: {e}")
         return []
 
-@st.cache_data(ttl=60, hash_funcs={gspread.client.Client: lambda _: None})
-def fetch_leaderboard_cells(target_spreadsheet, _gspread_client):
+@st.cache_data(ttl=60)
+def fetch_leaderboard_cells(target_spreadsheet):
     """Fetches high-velocity leaderboard ranges securely without API spamming."""
-    if not _gspread_client:
-        return []
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds_info = st.secrets["gspread_creds"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
+    local_client = gspread.authorize(creds)
     try:
-        sheet = _gspread_client.open(target_spreadsheet).worksheet("Student_Registry")
+        sheet = local_client.open(target_spreadsheet).worksheet("Student_Registry")
         return sheet.get("N225:P227")
     except Exception as e:
         return []
@@ -154,10 +158,7 @@ if client:
         # Clear selected choices if cohort is switched to guarantee proper mapping
         if cohort_choice != st.session_state["current_cohort"]:
             st.session_state["current_cohort"] = cohort_choice
-            if "challenge_class" in st.session_state:
-                del st.session_state["challenge_class"]
-            if "challenge_student" in st.session_state:
-                del st.session_state["challenge_student"]
+            st.cache_data.clear()  
             st.rerun()
             
         if cohort_choice == "Lower Sixth (BE Classes)":
@@ -169,7 +170,7 @@ if client:
         st.markdown("---")
 
         # 🛰️ FETCH DATA THROUGH THE CACHED ENGINE
-        all_rows = fetch_registry_data(target_spreadsheet, client)
+        all_rows = fetch_registry_data(target_spreadsheet)
         
         if all_rows and len(all_rows) > 0:
             headers = all_rows[0]
@@ -205,10 +206,18 @@ if client:
                 
                 with col1:
                     sorted_classes = sorted(list(class_registry.keys()))
-                    selected_class = st.selectbox("1. Select Form Class:", sorted_classes, key="challenge_class")
+                    selected_class = st.selectbox(
+                        "1. Select Form Class:", 
+                        sorted_classes, 
+                        key=f"class_select_{target_spreadsheet}"
+                    )
                     
                     student_options = sorted(class_registry.get(selected_class, []))
-                    selected_student = st.selectbox("2. Select Student Name:", student_options, key="challenge_student")
+                    selected_student = st.selectbox(
+                        "2. Select Student Name:", 
+                        student_options, 
+                        key=f"student_select_{target_spreadsheet}"
+                    )
                 
                 with col2:
                     months_list = ["March", "April", "May", "June", "July", "August", "September", "October"]
@@ -249,7 +258,6 @@ if client:
                 
                 if st.button("🔥 Submit Tally Data Logs", use_container_width=True):
                     try:
-                        # FIXED: Changed from "Reading_Article_DB" to "Reading_Articles_DB" to match your tab name
                         challenge_db = client.open(target_spreadsheet).worksheet("Reading_Articles_DB")
                         dates_string = ", ".join(reading_dates)
                         
@@ -270,6 +278,7 @@ if client:
                         st.error(f"Failed to record data: {e}")
 
         # ==================== TAB 2: LIVE REPORT GENERATOR ====================
+        # FIXED: This section is now fully isolated inside its own context block
         with portal_tab2:
             st.markdown("### 📊 Class Reading Overview")
             
@@ -278,12 +287,21 @@ if client:
             else:
                 available_classes = sorted(list(df_registry["Form Class"].unique()))
                 available_classes = [c for c in available_classes if c and not str(c).startswith("TOP")]
-                report_class = st.selectbox("Select Target Class to View:", available_classes)
+                
+                report_class = st.selectbox(
+                    "Select Target Class to View:", 
+                    available_classes, 
+                    key=f"report_class_{target_spreadsheet}"
+                )
                 
                 ordered_months = ["MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER"]
                 current_month_idx = datetime.now().month  
                 
                 visible_columns = ["Form Class", "Student Name"]
+                month_map = {
+                    "March": 3, "April": 4, "May": 5, "June": 6, 
+                    "July": 7, "August": 8, "September": 9, "October": 10
+                }
                 
                 for m_name in ordered_months:
                     found_col = next((col for col in df_registry.columns if col.upper().startswith(m_name[:3])), None)
@@ -377,11 +395,11 @@ if client:
                 )
 
         # ==================== TAB 3: LEADERBOARD & EXPORT ====================
+        # FIXED: This section is now fully isolated inside its own context block
         with portal_tab3:
             st.markdown("### 🏆 Cohort Top 3 Honors Registry")
             
-            # Use cached engine to check formula outputs securely
-            top_cells = fetch_leaderboard_cells(target_spreadsheet, client)
+            top_cells = fetch_leaderboard_cells(target_spreadsheet)
             
             if top_cells and len(top_cells) > 0:
                 cleaned_top_cells = []
@@ -488,7 +506,7 @@ if client:
                     file_name=f"PTES_Leaderboard_{cohort_choice.replace(' ', '_')}_{datetime.now().strftime('%b%Y')}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True,
-                    key="leaderboard_download_btn"
+                    key=f"leaderboard_{target_spreadsheet}"
                 )
             else:
                 st.info("No leaderboard records found. Please ensure your formulas are loaded in cells N225:P227.")
