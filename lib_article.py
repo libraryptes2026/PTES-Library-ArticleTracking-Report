@@ -35,7 +35,7 @@ def format_cell_borders_and_margins(cell, top=100, bottom=100, left=150, right=1
         tcMar.append(node)
     tcPr.append(tcMar)
     
-    # Crisp, Bold Solid Dark Borders
+    # Crisp, Bold Solid Black Borders
     tcBorders = OxmlElement('w:tcBorders')
     for border_name in ['top', 'left', 'bottom', 'right']:
         border = OxmlElement(f'w:{border_name}')
@@ -60,29 +60,28 @@ def connect_to_sheets():
 
 client = connect_to_sheets()
 
-# 🧠 CACHED DATA FETCH ENGINES (Prevents Quota 429 Errors)
-@st.cache_data(ttl=300) # Caches data for 5 minutes
-def fetch_registry_data(target_spreadsheet):
-    """Fetches full student registry row records with caching protection."""
-    if not client:
+# 🧠 ---STREAMLIT CACHING ENGINE WITH EXPLICIT KEY HASHING---
+@st.cache_data(ttl=300, hash_funcs={gspread.client.Client: lambda _: None})
+def fetch_registry_data(target_spreadsheet, _gspread_client):
+    """Fetches full student registry row records securely with caching."""
+    if not _gspread_client:
         return []
     try:
-        sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
+        sheet = _gspread_client.open(target_spreadsheet).worksheet("Student_Registry")
         return sheet.get_all_values()
     except Exception as e:
         st.error(f"Failed pulling registry rows from {target_spreadsheet}: {e}")
         return []
 
-@st.cache_data(ttl=60) # Leaderboards refresh faster (1 minute)
-def fetch_leaderboard_cells(target_spreadsheet):
-    """Fetches high-velocity leaderboard ranges securely."""
-    if not client:
+@st.cache_data(ttl=60, hash_funcs={gspread.client.Client: lambda _: None})
+def fetch_leaderboard_cells(target_spreadsheet, _gspread_client):
+    """Fetches high-velocity leaderboard ranges securely without API spamming."""
+    if not _gspread_client:
         return []
     try:
-        sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
+        sheet = _gspread_client.open(target_spreadsheet).worksheet("Student_Registry")
         return sheet.get("N225:P227")
     except Exception as e:
-        st.error(f"Failed pulling leaderboard cells from {target_spreadsheet}: {e}")
         return []
 
 # --- 3. SIDEBAR BRANDING & DIGITAL CITIZENSHIP ---
@@ -98,6 +97,12 @@ with st.sidebar:
         3. **Librarian Control:** Only authorized library staff may unlock and submit records.
         """)
     
+    st.divider()
+    if st.button("🔄 Clear System Memory Cache", use_container_width=True):
+        st.cache_data.clear()
+        st.success("Cache cleared! Reloading fresh data...")
+        st.rerun()
+
     st.divider()
     st.markdown("""
         <style>
@@ -164,7 +169,7 @@ if client:
         st.markdown("---")
 
         # 🛰️ FETCH DATA THROUGH THE CACHED ENGINE
-        all_rows = fetch_registry_data(target_spreadsheet)
+        all_rows = fetch_registry_data(target_spreadsheet, client)
         
         if all_rows and len(all_rows) > 0:
             headers = all_rows[0]
@@ -244,7 +249,8 @@ if client:
                 
                 if st.button("🔥 Submit Tally Data Logs", use_container_width=True):
                     try:
-                        challenge_db = client.open(target_spreadsheet).worksheet("Reading_Article_DB")
+                        # FIXED: Changed from "Reading_Article_DB" to "Reading_Articles_DB" to match your tab name
+                        challenge_db = client.open(target_spreadsheet).worksheet("Reading_Articles_DB")
                         dates_string = ", ".join(reading_dates)
                         
                         new_tally_row = [
@@ -375,14 +381,12 @@ if client:
             st.markdown("### 🏆 Cohort Top 3 Honors Registry")
             
             # Use cached engine to check formula outputs securely
-            top_cells = fetch_leaderboard_cells(target_spreadsheet)
+            top_cells = fetch_leaderboard_cells(target_spreadsheet, client)
             
             if top_cells and len(top_cells) > 0:
-                # Handle formula #N/A cleanups dynamically
                 cleaned_top_cells = []
                 for row in top_cells:
                     cleaned_row = [("Awaiting Data" if val == "#N/A" or val == "" else val) for val in row]
-                    # Ensure minimum element width requirements
                     while len(cleaned_row) < 3:
                         cleaned_row.append("0")
                     cleaned_top_cells.append(cleaned_row)
