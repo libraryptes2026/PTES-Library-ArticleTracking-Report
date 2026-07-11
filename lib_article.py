@@ -74,6 +74,29 @@ def connect_to_sheets():
 
 client = connect_to_sheets()
 
+# --- 🧠 HIGH-PERFORMANCE CACHING FUNCTIONS ENGINE ---
+@st.cache_data(ttl=600)  # Keeps data cached safely in memory for 10 minutes to prevent 429 Errors
+def fetch_registry_rows(target_spreadsheet):
+    """Securely downloads and caches student records."""
+    # We create an isolated internal client execution layer inside the cache pool
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds_info = st.secrets["gspread_creds"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
+    local_client = gspread.authorize(creds)
+    sheet = local_client.open(target_spreadsheet).worksheet("Student_Registry")
+    return sheet.get_all_values()
+
+@st.cache_data(ttl=600)
+def fetch_leaderboard_range(target_spreadsheet):
+    """Securely fetches leaderboard ranges separately to prevent heavy sheet reloading."""
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds_info = st.secrets["gspread_creds"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_info, scope)
+    local_client = gspread.authorize(creds)
+    sheet = local_client.open(target_spreadsheet).worksheet("Student_Registry")
+    return sheet.get("N225:P227")
+
+
 # --- 3. SIDEBAR ---
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/c/c3/Flag_of_Brunei.svg/180px-Flag_of_Brunei.svg.png", width=100)
@@ -86,6 +109,14 @@ with st.sidebar:
         2. **Honesty & Integrity:** Tallies must correspond strictly to verified student readings.
         3. **Librarian Control:** Only authorized library staff may unlock and submit records.
         """)
+        
+    st.divider()
+    # Manual bypass fallback control in case they want fresh sheet values immediately
+    if st.button("🔄 Force Clear Cached Memory", use_container_width=True):
+        st.cache_data.clear()
+        st.success("App cache cleared successfully!")
+        st.rerun()
+        
     st.divider()
     st.markdown("""
         <div style='font-size: 11px; font-weight: bold; text-align: center; margin-bottom: 8px;'>
@@ -123,8 +154,8 @@ if client:
         st.markdown("---")
 
         try:
-            registry_sheet = client.open(target_spreadsheet).worksheet("Student_Registry")
-            all_rows = registry_sheet.get_all_values()
+            # Replaced heavy sheet processing with optimized memory lookup wrapper
+            all_rows = fetch_registry_rows(target_spreadsheet)
             
             headers = all_rows[0]
             data_rows = all_rows[1:]
@@ -208,19 +239,21 @@ if client:
                         challenge_db = client.open(target_spreadsheet).worksheet("Reading_Article_DB")
                         dates_string = ", ".join(reading_dates)
                         
-                        # Perfect strict layout list matching headers sequentially:
-                        # Col A=Timestamp, B=Class, C=Name, D=Month, E=Articles Read, F=Target Dates, G=Remarks
                         new_tally_row = [
                             str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")),
                             str(selected_class),
                             str(selected_student),
                             str(selected_month),
-                            int(article_count),  # Raw integer maps directly into Column E
+                            int(article_count),  
                             str(dates_string),
                             str(student_remarks).strip()
                         ]
                         
                         challenge_db.append_row(new_tally_row, value_input_option="USER_ENTERED")
+                        
+                        # ✨ CLEAR THE MEMORY CACHE IN REAL-TIME UPON ADDING NEW TALLIES
+                        st.cache_data.clear()
+                        
                         st.success(f"🎉 Success! Recorded {article_count} articles into Column E.")
                         st.balloons()
                     except Exception as e:
@@ -270,7 +303,6 @@ if client:
                     section.left_margin = Inches(0.5)
                     section.right_margin = Inches(0.5)
                     
-                    # Safe Header/Footer page calculation injection
                     footer_p = section.footer.paragraphs[0]
                     footer_p.alignment = 2  
                     footer_run = footer_p.add_run("Page ")
@@ -334,7 +366,9 @@ if client:
         with portal_tab3:
             st.markdown("### 🏆 Cohort Top 3 Honors Registry")
             try:
-                top_cells = registry_sheet.get("N225:P227")
+                # Replaced heavy sheet get range call with memory optimized lookup
+                top_cells = fetch_leaderboard_range(target_spreadsheet)
+                
                 if top_cells and len(top_cells) > 0:
                     cols_dash = st.columns(len(top_cells))
                     medals = ["🥇 1st Place", "🥈 2nd Place", "🥉 3rd Place"]
