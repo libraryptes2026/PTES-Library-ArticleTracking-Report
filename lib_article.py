@@ -75,7 +75,7 @@ def connect_to_sheets():
 client = connect_to_sheets()
 
 # --- 🧠 HIGH-PERFORMANCE CACHING FUNCTIONS ENGINE ---
-@st.cache_data(ttl=600)  # Keeps data cached safely in memory for 10 minutes to prevent 429 Errors
+@st.cache_data(ttl=600)  
 def fetch_registry_rows(target_spreadsheet):
     """Securely downloads and caches student records."""
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -175,7 +175,7 @@ if client:
             class_registry = {}
             ordered_classes = []
 
-        # EXPANDED TABS CONFIGURATION (ADDED THE 4th TAB FOR THE DUSTBIN SYSTEM)
+        # TABS CONFIGURATION
         portal_tab1, portal_tab2, portal_tab3, portal_tab4 = st.tabs([
             "📝 Submit Tally Logs", 
             "📊 Class Statistics Report", 
@@ -427,7 +427,7 @@ if client:
             except Exception as e:
                 st.error(f"Error executing leaderboard logic: {e}")
 
-        # ==================== TAB 4: LOG DUSTBIN (PER-DATE GRANULAR DELETION) ====================
+        # ==================== TAB 4: LOG DUSTBIN (POSITIONAL INDEX SAFE DELETION) ====================
         with portal_tab4:
             st.markdown("### 🗑️ Precise Reading Log Deletion")
             st.write("Locate a student's record to remove individual reading dates.")
@@ -435,19 +435,16 @@ if client:
             if not class_registry:
                 st.warning("No student registry found for the selected cohort.")
             else:
-                # Parameters 1 & 2: Class and Student selection (derived automatically based on selected database)
                 d_class = st.selectbox("1. Select Target Form Class:", ordered_classes, key="dustbin_class")
                 d_student_options = class_registry.get(d_class, [])
                 d_student = st.selectbox("2. Select Student Name:", d_student_options, key="dustbin_student")
                 
-                # Parameter 3: Month selection
                 months_list_d = ["March", "April", "May", "June", "July", "August", "September", "October"]
                 d_month = st.selectbox("3. Select Month to Audit:", months_list_d, key="dustbin_month")
 
                 st.markdown("---")
 
                 try:
-                    # Access the log transaction sheet directly without caching to avoid out-of-sync edits
                     log_sheet = client.open(target_spreadsheet).worksheet("Reading_Article_DB")
                     all_logs = log_sheet.get_all_values()
 
@@ -456,28 +453,32 @@ if client:
                         log_rows = all_logs[1:]
                         df_logs = pd.DataFrame(log_rows, columns=log_headers)
 
-                        # Match target rows matching our 3 selector queries
+                        # Match target rows matching our filtering rules safely using column positions if text names differ
+                        # Form Class is column 1 (Index 1), Student Name is column 2 (Index 2), Month is column 3 (Index 3)
                         matched_rows = df_logs[
-                            (df_logs["Form Class"] == d_class) & 
-                            (df_logs["Student Name"] == d_student) & 
-                            (df_logs["Month"] == d_month)
+                            (df_logs.iloc[:, 1] == d_class) & 
+                            (df_logs.iloc[:, 2] == d_student) & 
+                            (df_logs.iloc[:, 3] == d_month)
                         ]
 
                         if matched_rows.empty:
                             st.info(f"No existing reading log rows found for **{d_student}** within the month of **{d_month}**.")
                         else:
                             for idx, row in matched_rows.iterrows():
-                                raw_dates_str = row.get("Target Dates", "")
-                                date_list = [d.strip() for d in raw_dates_str.split(",") if d.strip()]
+                                # Target Dates is Column 6 (Index 5)
+                                raw_dates_str = row.iloc[5]
+                                # Amount is Column 5 (Index 4)
+                                current_amount = row.iloc[4]
+                                
+                                date_list = [d.strip() for d in str(raw_dates_str).split(",") if d.strip()]
                                 
                                 if not date_list:
                                     st.warning("This data record doesn't contain any comma-separated calendar dates.")
                                     continue
 
-                                st.write(f"📊 **Current Recorded Summary Total:** {row['Amount of Reading Articles Done']} articles.")
+                                st.write(f"📊 **Current Recorded Summary Total:** {current_amount} articles.")
                                 st.write("Below are the stored calendar dates. Click remove next to any specific item to correct the ledger:")
 
-                                # List out matching dates vertically with side-car trash icon handles
                                 for date_idx, date_str in enumerate(date_list):
                                     col_date, col_btn = st.columns([4, 1])
                                     
@@ -485,31 +486,24 @@ if client:
                                         st.markdown(f"🗓️ Reading Session Entry: `{date_str}`")
                                     
                                     with col_btn:
-                                        # Distinct compound widget handles prevent Streamlit layout assignment crashes
-                                        btn_key = f"del_{row['Timestamp'].replace(' ', '_').replace(':', '_')}_{date_idx}"
+                                        timestamp_clean = str(row.iloc[0]).replace(' ', '_').replace(':', '_')
+                                        btn_key = f"del_{timestamp_clean}_{date_idx}"
                                         
                                         if st.button("❌ Remove Date", key=btn_key, use_container_width=True):
-                                            # Derive spreadsheet index location row mapping offset
                                             actual_sheet_row = idx + 2 
-                                            
-                                            # Splice date out of tracking loop
                                             date_list.pop(date_idx)
                                             
                                             if len(date_list) == 0:
-                                                # No dates remaining implies entry validation is void, remove complete entry row
                                                 log_sheet.delete_rows(actual_sheet_row)
                                                 st.toast("Empty month entry dropped completely!")
                                             else:
-                                                # Rebuild date array string and calculate fresh size total
                                                 new_dates_str = ", ".join(date_list)
                                                 new_count = len(date_list)
                                                 
-                                                # Column E is index 5 (Amount), Column F is index 6 (Target Dates)
                                                 log_sheet.update_cell(actual_sheet_row, 5, new_count)
                                                 log_sheet.update_cell(actual_sheet_row, 6, new_dates_str)
                                                 st.toast(f"Recalculated reading balance down to: {new_count}")
 
-                                            # Reset high-speed local storage layers completely
                                             st.cache_data.clear()
                                             st.success(f"Successfully purged date {date_str} from logs.")
                                             st.rerun()
